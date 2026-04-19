@@ -1,0 +1,1982 @@
+import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
+import { Search, Plus, Wrench, Clock, CheckCircle, ArrowLeftRight, X, User, Phone, Tag, AlertCircle, ShoppingBag, Globe, ChevronLeft, ChevronRight, FileText } from 'lucide-react';
+import { useAppContext } from '../context/AppContext';
+import { MaintenanceRecord } from '../types';
+import { formatNumber, parseFormattedNumber } from '../lib/utils';
+import { generateId } from '../lib/idUtils';
+import { apiService } from '../services/api';
+
+const toYMD = (dateStr: string | undefined | null) => {
+  if (!dateStr) return '';
+  if (dateStr.includes('/')) {
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+    }
+  } else if (dateStr.includes('-')) {
+    const parts = dateStr.split('-');
+    if (parts[0].length === 4) return dateStr.substring(0, 10);
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+    }
+  }
+  return dateStr;
+};
+
+const toDMY = (dateStr: string | undefined | null) => {
+  if (!dateStr) return '---';
+  if (dateStr.includes('-')) {
+    const parts = dateStr.split('T')[0].split('-');
+    if (parts[0].length === 4) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+  }
+  return dateStr;
+};
+
+export const Maintenance: React.FC = () => {
+  const { maintenanceRecords, addMaintenanceRecord, updateMaintenanceRecord, maintenanceTransfers, addMaintenanceTransfer, updateMaintenanceTransfer, customers, addCustomer, suppliers, addSupplier, invoices, externalSerials, addExternalSerial, currentUser, addInvoice, products, serials } = useAppContext();
+  const location = useLocation();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState<MaintenanceRecord | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('type') === 'repair') {
+      setIsModalOpen(true);
+    }
+  }, [location.search]);
+
+  // Form state
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerAddress, setCustomerAddress] = useState('');
+  const [customerSearchTerm, setCustomerSearchTerm] = useState('');
+  const [selectedCustomerObj, setSelectedCustomerObj] = useState<any>(null);
+  const [selectedExternalDeviceObj, setSelectedExternalDeviceObj] = useState<any>(null);
+  const [productName, setProductName] = useState('');
+  const [serialNumber, setSerialNumber] = useState('');
+  const [issue, setIssue] = useState('');
+  const [cost, setCost] = useState('');
+  const [note, setNote] = useState('');
+  const [feedbackText, setFeedbackText] = useState('');
+  const [isEditingRecord, setIsEditingRecord] = useState(false);
+  const [editRecordData, setEditRecordData] = useState<Partial<MaintenanceRecord>>({});
+
+  const [deviceSource, setDeviceSource] = useState<'STORE'|'EXTERNAL'>('STORE');
+  const [customerSuggestions, setCustomerSuggestions] = useState<any[]>([]);
+  const [storeDevices, setStoreDevices] = useState<any[]>([]);
+  const [externalDeviceSearch, setExternalDeviceSearch] = useState('');
+  const [externalDeviceSuggestions, setExternalDeviceSuggestions] = useState<any[]>([]);
+  
+  const [isExternalModalOpen, setIsExternalModalOpen] = useState(false);
+  const [newExtProduct, setNewExtProduct] = useState('');
+  const [newExtSn, setNewExtSn] = useState('');
+  const [newExtSource, setNewExtSource] = useState('');
+
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState('');
+  const [newCustomerPhone, setNewCustomerPhone] = useState('');
+  const [newCustomerAddress, setNewCustomerAddress] = useState('');
+  
+  const [deviceWarrantyStatus, setDeviceWarrantyStatus] = useState<{isExpired: boolean, days: number, text: string} | null>(null);
+
+  const [statusConfirmModal, setStatusConfirmModal] = useState<{isOpen: boolean, newStatus: any, recordId: string | null}>({isOpen: false, newStatus: null, recordId: null});
+  
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+  const [invoiceItems, setInvoiceItems] = useState<any[]>([]);
+  const [invoiceSearchTerm, setInvoiceSearchTerm] = useState('');
+  const [invoicePaid, setInvoicePaid] = useState('');
+
+  const [isSerialModalOpen, setIsSerialModalOpen] = useState(false);
+  const [activeSerialProduct, setActiveSerialProduct] = useState<any>(null);
+
+  const addInvoiceItem = (product: any, sn?: string) => {
+    if (!product.isService && product.stock !== null && product.stock <= 0 && !sn) {
+      alert("Sản phẩm tạm hết hàng trong kho!");
+      return;
+    }
+
+    setInvoiceItems(prev => {
+      const existing = prev.find(item => item.id === product.id);
+      
+      if (product.hasSerial) {
+        if (!sn) {
+          setActiveSerialProduct(product);
+          setIsSerialModalOpen(true);
+          return prev;
+        }
+
+        if (existing) {
+          if (existing.serials?.includes(sn)) {
+            alert("Serial đã chọn!");
+            return prev;
+          }
+          return prev.map(i => i.id === product.id ? { 
+            ...i, 
+            qty: i.qty + 1, 
+            serials: [...(i.serials || []), sn] 
+          } : i);
+        }
+
+        return [...prev, { 
+          id: product.id, 
+          name: product.name, 
+          price: product.price, 
+          qty: 1, 
+          hasSerial: true,
+          serials: [sn],
+        }];
+      }
+
+      if (existing) {
+        if (!product.isService && existing.qty >= (product.stock || 0)) {
+          alert("Không đủ số lượng tồn kho!");
+          return prev;
+        }
+        return prev.map(i => i.id === product.id ? { ...i, qty: i.qty + 1 } : i);
+      }
+
+      return [...prev, { 
+        id: product.id, 
+        name: product.name, 
+        price: product.price, 
+        qty: 1 
+      }];
+    });
+    
+    setInvoiceSearchTerm('');
+  };
+
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [transferDest, setTransferDest] = useState('');
+  const [transferAccessories, setTransferAccessories] = useState('');
+  const [transferActionStatus, setTransferActionStatus] = useState<'Đóng hàng' | 'Đã chuyển' | 'Xử lý xong' | 'Hoàn thành nhận lại'>('Đóng hàng');
+  const [transferCost, setTransferCost] = useState('');
+  const [transferShippingCost, setTransferShippingCost] = useState('');
+  const [transferDate, setTransferDate] = useState('');
+  const [transferReturnDate, setTransferReturnDate] = useState('');
+  const [transferNote, setTransferNote] = useState('');
+
+  const [isTransferSupplierModalOpen, setIsTransferSupplierModalOpen] = useState(false);
+  const [newTransferSupplierName, setNewTransferSupplierName] = useState('');
+  const [newTransferSupplierPhone, setNewTransferSupplierPhone] = useState('');
+
+  // Prevent background scrolling when any modal is open
+  useEffect(() => {
+    const isAnyModalOpen = isModalOpen || !!selectedRecord || isTransferModalOpen || isExternalModalOpen || isCustomerModalOpen || isTransferSupplierModalOpen || statusConfirmModal.isOpen;
+    if (isAnyModalOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => { document.body.style.overflow = 'unset'; };
+  }, [isModalOpen, selectedRecord, isTransferModalOpen, isExternalModalOpen, isCustomerModalOpen, isTransferSupplierModalOpen, statusConfirmModal.isOpen]);
+
+  const filteredRecords = (maintenanceRecords || [])
+    .filter(r => {
+      if (statusFilter !== 'ALL' && r.status !== statusFilter) return false;
+      return r.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+             r.customerPhone.includes(searchTerm) ||
+             r.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+             (r.serialNumber || '').toLowerCase().includes(searchTerm.toLowerCase());
+    })
+    .sort((a, b) => {
+      const numA = parseInt(a.id.replace(/\D/g, '') || '0');
+      const numB = parseInt(b.id.replace(/\D/g, '') || '0');
+      return numB - numA;
+    });
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(20);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter, rowsPerPage]);
+
+  const totalPages = Math.ceil(filteredRecords.length / rowsPerPage);
+  const startIndex = (currentPage - 1) * rowsPerPage;
+  const endIndex = startIndex + rowsPerPage;
+  const paginatedRecords = filteredRecords.slice(startIndex, endIndex);
+
+  const handleSave = async () => {
+    if (!customerName || !customerPhone || !productName || !issue) {
+      alert('Vui lòng nhập đủ thông tin bắt buộc');
+      return;
+    }
+
+    const now = new Date();
+    const id = generateId('BH', maintenanceRecords);
+    
+    let warrantyInfo = 'Ngoài bảo hành';
+    if (deviceWarrantyStatus && !deviceWarrantyStatus.isExpired && deviceWarrantyStatus.days > 0) {
+      warrantyInfo = `Còn ${deviceWarrantyStatus.days} ngày`;
+    }
+
+    await addMaintenanceRecord({
+      id,
+      date: now.toLocaleString('vi-VN'),
+      customerName,
+      customerPhone,
+      productName,
+      serialNumber,
+      issue,
+      status: 'RECEIVING',
+      cost: parseFormattedNumber(cost) || 0,
+      note,
+      warrantyRemainingInfo: warrantyInfo
+    });
+
+    setIsModalOpen(false);
+    resetForm();
+  };
+
+  const handleAddCustomer = async () => {
+    if (!newCustomerName) {
+      alert('Vui lòng nhập tên khách hàng.');
+      return;
+    }
+    const payload = {
+      name: newCustomerName,
+      phone: newCustomerPhone,
+      address: newCustomerAddress,
+      createdBy: currentUser?.name || 'Admin',
+    };
+    
+    // UI update right away
+    setSelectedCustomerObj(payload);
+    setCustomerName(payload.name);
+    setCustomerPhone(payload.phone);
+    setCustomerAddress(payload.address);
+    setCustomerSearchTerm('');
+    setCustomerSuggestions([]);
+    setIsCustomerModalOpen(false);
+    
+    try {
+      await addCustomer(payload);
+    } catch (err) {
+      console.error(err);
+      alert('Có lỗi khi thêm khách hàng.');
+    }
+  };
+
+  const handleAddExternalSerial = async () => {
+    if (!newExtProduct) {
+      alert('Vui lòng nhập tên sản phẩm.');
+      return;
+    }
+    const payload = {
+      id: generateId('EX', externalSerials || []),
+      date: new Date().toLocaleString('vi-VN'),
+      product: newExtProduct,
+      sn: newExtSn,
+      source: newExtSource,
+      customer: customerName, // Link to current customer
+      createdBy: currentUser?.name || 'Admin',
+    };
+    
+    // UI update right away for speed
+    setProductName(payload.product);
+    setSerialNumber(payload.sn);
+    setSelectedExternalDeviceObj({
+      product: payload.product,
+      sn: payload.sn,
+      source: payload.source
+    });
+    setExternalDeviceSearch('');
+    setIsExternalModalOpen(false);
+    setExternalDeviceSuggestions([]);
+    
+    try {
+      await addExternalSerial(payload);
+    } catch (err) {
+      console.error(err);
+      alert('Có lỗi khi thêm thiết bị.');
+    }
+  };
+
+  const resetForm = () => {
+    setCustomerName('');
+    setCustomerPhone('');
+    setCustomerAddress('');
+    setProductName('');
+    setSerialNumber('');
+    setIssue('');
+    setCost('');
+    setNote('');
+    setDeviceSource('STORE');
+    setStoreDevices([]);
+    setCustomerSuggestions([]);
+    setDeviceWarrantyStatus(null);
+    setExternalDeviceSearch('');
+    setExternalDeviceSuggestions([]);
+    setCustomerSearchTerm('');
+    setSelectedCustomerObj(null);
+    setSelectedExternalDeviceObj(null);
+  };
+
+  const handleCustomerChange = (val: string) => {
+    setCustomerSearchTerm(val);
+    if (val.trim()) {
+      setCustomerSuggestions(customers.filter(c => c.name.toLowerCase().includes(val.toLowerCase()) || (c.phone && c.phone.includes(val))));
+    } else {
+      setCustomerSuggestions([]);
+    }
+  };
+
+  const handleSelectCustomer = (c: any) => {
+    setSelectedCustomerObj(c);
+    setCustomerName(c.name);
+    setCustomerPhone(c.phone || '');
+    setCustomerAddress(c.address || '');
+    setCustomerSuggestions([]);
+    
+    // Load store devices
+    const custInvoices = invoices.filter(inv => inv.customer === c.name || (c.phone && inv.phone === c.phone));
+    let devs: any[] = [];
+    custInvoices.forEach(inv => {
+      inv.items.forEach(item => {
+        if (item.sn) {
+           const sns = Array.isArray(item.sn) ? item.sn : item.sn.split(',').map((s:string) => s.trim());
+           sns.forEach((s:string) => {
+             devs.push({ name: item.name, sn: s, date: inv.date, warrantyExpiry: item.warrantyExpiry });
+           });
+        } else {
+           devs.push({ name: item.name, sn: '', date: inv.date, warrantyExpiry: item.warrantyExpiry });
+        }
+      });
+    });
+    setStoreDevices(devs);
+
+    // Auto-fill external devices to suggestions if they exist for this customer
+    const custExternalSerials = (externalSerials || []).filter(s => s.customer === c.name);
+    if (custExternalSerials.length > 0) {
+      setExternalDeviceSuggestions(custExternalSerials);
+      setDeviceSource('EXTERNAL');
+    }
+  };
+
+  const handleSerialNumberChange = (val: string) => {
+    setSerialNumber(val);
+    
+    // Auto-complete if full exact match (opt-in automatic)
+    if (val.trim()) {
+      const matchedExternal = (externalSerials || []).find(s => s.sn.toLowerCase() === val.toLowerCase());
+      if (matchedExternal) {
+        setProductName(matchedExternal.product);
+        setExternalDeviceSearch(matchedExternal.product);
+        setDeviceSource('EXTERNAL');
+      }
+    }
+  };
+
+  const calculateWarranty = (expiryStr: string | undefined | null) => {
+    if (!expiryStr) {
+      setDeviceWarrantyStatus(null);
+      return;
+    }
+    
+    // Parse DD/MM/YYYY text
+    const parts = expiryStr.split(/[\s,]+/);
+    const datePart = parts.find(p => p.includes('/'));
+    if (!datePart) {
+      setDeviceWarrantyStatus(null);
+      return;
+    }
+    
+    const [day, month, year] = datePart.split('/');
+    if (!day || !month || !year) {
+      setDeviceWarrantyStatus(null);
+      return;
+    }
+    
+    const expiryDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), 23, 59, 59);
+    const now = new Date();
+    
+    const diffTime = expiryDate.getTime() - now.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays >= 0) {
+      setDeviceWarrantyStatus({
+        isExpired: false,
+        days: diffDays,
+        text: `Còn bảo hành ${diffDays} ngày (đến ${expiryStr})`
+      });
+    } else {
+      setDeviceWarrantyStatus({
+        isExpired: true,
+        days: Math.abs(diffDays),
+        text: `Ngoài bảo hành (hết hạn ${expiryStr})`
+      });
+    }
+  };
+
+  const handleExternalSearch = (val: string) => {
+    setExternalDeviceSearch(val);
+    setProductName(val);
+    if (val.trim()) {
+      setExternalDeviceSuggestions((externalSerials || []).filter(s => 
+        s.product.toLowerCase().includes(val.toLowerCase()) || 
+        (s.sn && s.sn.toLowerCase().includes(val.toLowerCase()))
+      ));
+    } else {
+      // Show devices belonging to this customer when focused but empty search
+      setExternalDeviceSuggestions((externalSerials || []).filter(s => s.customer === customerName));
+    }
+  };
+
+  const handleSelectExternalDevice = (dev: any) => {
+    setSelectedExternalDeviceObj(dev);
+    setExternalDeviceSearch('');
+    setProductName(dev.product);
+    setSerialNumber(dev.sn || '');
+    setExternalDeviceSuggestions([]);
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'RECEIVING': return 'bg-red-100 text-red-700';
+      case 'REPAIRING': return 'bg-orange-100 text-orange-700';
+      case 'COMPLETED': return 'bg-blue-100 text-blue-700';
+      case 'RETURNED': return 'bg-emerald-100 text-emerald-700';
+      default: return 'bg-slate-100 text-slate-700';
+    }
+  };
+
+  const getWarrantyColor = (info: string | undefined) => {
+    if (!info || info === 'Ngoài bảo hành' || info === 'Hết hạn' || info === '-') return 'text-rose-700';
+    if (info.includes('Còn')) return 'text-emerald-600';
+    return 'text-slate-700';
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'RECEIVING': return 'Tiếp nhận';
+      case 'REPAIRING': return 'Đang sửa';
+      case 'COMPLETED': return 'Đã xong';
+      case 'RETURNED': return 'Đã trả khách';
+      default: return status;
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col px-4 md:px-0 py-4 md:py-0">
+      <div className="flex flex-col md:flex-row md:items-center gap-4 mb-6 shrink-0">
+        <div className="flex-1 flex flex-col md:flex-row items-center gap-3">
+          <div className="w-full bg-white px-4 py-2.5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3 focus-within:border-blue-400 transition-all">
+            <Search className="text-slate-400" size={18} />
+            <input 
+              type="text" 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Tìm kiếm phiếu bảo hành/sửa chữa..." 
+              className="flex-1 bg-transparent text-sm font-medium outline-none"
+            />
+          </div>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="w-full md:w-auto p-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold outline-none focus:border-blue-400 shadow-sm text-slate-700"
+          >
+            <option value="ALL">Tất cả trạng thái</option>
+            <option value="RECEIVING">Tiếp nhận</option>
+            <option value="REPAIRING">Đang sửa</option>
+            <option value="COMPLETED">Đã xong</option>
+            <option value="RETURNED">Đã trả khách</option>
+          </select>
+        </div>
+        <button 
+          onClick={() => setIsModalOpen(true)}
+          className="w-full md:w-auto px-6 py-3 bg-blue-600 text-white rounded-xl shadow-md flex items-center justify-center gap-2 font-semibold text-sm tracking-wide active:scale-95 transition-all hover:bg-blue-700"
+        >
+          <Plus size={16} /> Tiếp nhận máy
+        </button>
+      </div>
+
+      <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col mb-6">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse hidden md:table">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="p-4 text-xs font-bold text-slate-500 tracking-wider uppercase">Mã phiếu</th>
+                <th className="p-4 text-xs font-bold text-slate-500 tracking-wider uppercase">Khách hàng</th>
+                <th className="p-4 text-xs font-bold text-slate-500 tracking-wider uppercase">Thiết bị</th>
+                <th className="p-4 text-xs font-bold text-slate-500 tracking-wider uppercase">Tình trạng</th>
+                <th className="p-4 text-xs font-bold text-slate-500 tracking-wider text-center uppercase">Trạng thái</th>
+                <th className="p-4 text-xs font-bold text-slate-500 tracking-wider text-center uppercase">Bảo hành</th>
+                <th className="p-4 text-xs font-bold text-slate-500 tracking-wider text-right uppercase">Chi phí</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRecords.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="p-10 text-center text-slate-400 italic text-sm">Chưa có phiếu bảo hành nào.</td>
+                </tr>
+              ) : (
+                paginatedRecords.map(r => (
+                  <tr 
+                    key={r.id} 
+                    onClick={() => {
+                      setSelectedRecord(r);
+                      setFeedbackText(r.feedback || '');
+                    }}
+                    className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors cursor-pointer group"
+                  >
+                    <td className="p-4">
+                      <span className="font-semibold text-sm text-slate-800 tracking-tight">{r.id}</span>
+                      <p className="text-[10px] text-slate-400 font-medium mt-1">{r.date}</p>
+                    </td>
+                    <td className="p-4">
+                      <p className="font-semibold text-sm text-slate-800 tracking-tight">{r.customerName}</p>
+                      <p className="text-xs text-slate-400 font-medium">{r.customerPhone}</p>
+                    </td>
+                    <td className="p-4">
+                      <p className="font-semibold text-sm text-slate-800 tracking-tight">{r.productName}</p>
+                      {r.serialNumber && <p className="text-[10px] text-orange-500 font-medium tracking-wide font-mono">SN: {r.serialNumber}</p>}
+                    </td>
+                    <td className="p-4">
+                      <p className="text-sm text-slate-600 font-medium line-clamp-1">{r.issue}</p>
+                    </td>
+                    <td className="p-4 text-center">
+                      <div className="flex flex-col items-center gap-1.5 justify-center h-full">
+                        <span className={`px-4 py-1.5 rounded-full text-[10px] font-bold tracking-wide ${getStatusColor(r.status)}`}>
+                          {getStatusText(r.status)}
+                        </span>
+                        {r.transferInfo && (
+                          <span className="px-2 py-1 rounded text-[9px] font-bold bg-violet-100 text-violet-700 flex items-center justify-center gap-0.5 w-max">
+                            <ArrowLeftRight size={10} /> Chuyển tuyến
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-4 text-center">
+                      <p className={`text-xs font-bold ${getWarrantyColor(r.warrantyRemainingInfo || 'Ngoài bảo hành')}`}>
+                        {r.warrantyRemainingInfo || 'Ngoài bảo hành'}
+                      </p>
+                    </td>
+                    <td className="p-4 text-right">
+                      <span className="font-semibold text-base text-slate-800">{formatNumber(r.cost)}đ</span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden divide-y divide-slate-100">
+            {filteredRecords.length === 0 ? (
+              <div className="p-10 text-center text-slate-400 italic text-sm">Chưa có phiếu bảo hành nào.</div>
+            ) : (
+              paginatedRecords.map(r => (
+                <div 
+                  key={r.id} 
+                  onClick={() => {
+                    setSelectedRecord(r);
+                    setFeedbackText(r.feedback || '');
+                  }}
+                  className="p-4 space-y-3 active:bg-slate-50 transition-colors"
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <span className="font-bold text-sm text-slate-800">{r.id}</span>
+                      <p className="text-xs text-slate-400 font-medium">{r.date}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className={`px-3 py-1 rounded-full text-[10px] font-bold tracking-wide ${getStatusColor(r.status)}`}>
+                        {getStatusText(r.status)}
+                      </span>
+                      {r.transferInfo && (
+                        <span className="px-2 py-1 rounded text-[9px] font-bold bg-violet-100 text-violet-700 flex items-center gap-0.5">
+                          <ArrowLeftRight size={10} /> Chuyển tuyến
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
+                      <User size={16} />
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm text-slate-800">{r.customerName}</p>
+                      <p className="text-xs text-slate-400 font-medium">{r.customerPhone}</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
+                    <p className="text-sm font-bold text-slate-700">{r.productName}</p>
+                    {r.serialNumber && <p className="text-[10px] text-orange-500 font-semibold font-mono mt-0.5">SN: {r.serialNumber}</p>}
+                    <p className="text-xs text-slate-500 mt-2 line-clamp-2 italic">"{r.issue}"</p>
+                  </div>
+                  
+                  <div className="flex justify-between items-center py-1 border-t border-slate-50">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">TG Bảo hành</span>
+                    <span className={`font-bold text-xs ${getWarrantyColor(r.warrantyRemainingInfo || 'Ngoài bảo hành')}`}>
+                      {r.warrantyRemainingInfo || 'Ngoài bảo hành'}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center pt-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Dự kiến chi phí</span>
+                    <span className="font-bold text-base text-blue-600">{formatNumber(r.cost)}đ</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Pagination */}
+        {filteredRecords.length > 0 && (
+          <div className="px-4 py-3 border-t border-slate-200 bg-white flex items-center justify-between text-sm shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="text-slate-500">Hiển thị</span>
+              <select 
+                value={rowsPerPage} 
+                onChange={(e) => setRowsPerPage(Number(e.target.value))}
+                className="border border-slate-300 rounded px-2 py-1 bg-white focus:outline-none focus:border-blue-500"
+              >
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+              <span className="text-slate-500">dòng / trang</span>
+            </div>
+            
+            <div className="flex items-center gap-4">
+              <span className="text-slate-500 font-medium hidden sm:inline">
+                {startIndex + 1} - {Math.min(endIndex, filteredRecords.length)} trên tổng {filteredRecords.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <button 
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="p-1.5 border border-slate-300 rounded hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed bg-white transition-colors"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <span className="px-3 font-medium text-slate-700">{currentPage} / {totalPages || 1}</span>
+                <button 
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages || totalPages === 0}
+                  className="p-1.5 border border-slate-300 rounded hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed bg-white transition-colors"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Add Maintenance Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-lg max-h-[90vh] flex flex-col rounded-xl shadow-2xl animate-in fade-in zoom-in duration-200 overflow-hidden">
+            <div className="flex justify-between items-center p-6 border-b border-slate-100 shrink-0">
+              <h3 className="text-lg font-bold text-slate-800 tracking-tight">Tiếp nhận bảo hành / sửa chữa</h3>
+              <button onClick={() => setIsModalOpen(false)} className="w-8 h-8 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-200 transition-colors flex items-center justify-center">
+                <X size={18} />
+              </button>
+            </div>
+            
+            <div className={`p-6 space-y-4 flex-1 overflow-y-auto no-scrollbar`}>
+              {!selectedCustomerObj ? (
+                <div className="relative">
+                  <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg overflow-hidden shadow-inner focus-within:border-blue-400 mt-1">
+                    <Search className="text-slate-400 ml-3 shrink-0" size={16} />
+                    <input 
+                      type="text" 
+                      value={customerSearchTerm}
+                      onChange={(e) => handleCustomerChange(e.target.value)}
+                      className="w-full p-3 bg-transparent text-sm font-semibold outline-none" 
+                      placeholder="Tìm tên hoặc số điện thoại khách hàng..." 
+                    />
+                  </div>
+                  {(customerSuggestions.length > 0 || (customerSearchTerm.trim() && customerSuggestions.length === 0)) && (
+                    <div className="bg-white border border-slate-200 rounded-lg shadow-md mt-2 max-h-[40vh] overflow-y-auto flex flex-col shrink-0">
+                      <div className="overflow-y-auto flex-1">
+                        {customerSuggestions.map((c, idx) => (
+                          <div 
+                            key={idx} 
+                            onClick={() => handleSelectCustomer(c)}
+                            className="p-3 border-b border-slate-50 hover:bg-slate-50 cursor-pointer flex justify-between items-center transition-colors"
+                          >
+                            <div>
+                              <p className="text-sm font-bold text-slate-800">{c.name}</p>
+                              <p className="text-[10px] text-slate-500">{c.address}</p>
+                            </div>
+                            <span className="text-xs font-medium text-slate-600">{c.phone}</span>
+                          </div>
+                        ))}
+                      </div>
+                      
+                      {customerSearchTerm.trim() && customerSuggestions.length === 0 && (
+                        <div 
+                          onClick={() => {
+                            setNewCustomerName(customerSearchTerm);
+                            setNewCustomerPhone('');
+                            setNewCustomerAddress('');
+                            setIsCustomerModalOpen(true);
+                            setCustomerSuggestions([]);
+                          }}
+                          className="p-3 bg-blue-50 text-blue-700 font-bold text-sm text-center cursor-pointer hover:bg-blue-100 transition-colors border-t border-blue-100 flex items-center justify-center gap-2"
+                        >
+                          <Plus size={16} /> Thêm mới khách hàng "{customerSearchTerm}"
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 relative group">
+                  <button 
+                    onClick={() => { setSelectedCustomerObj(null); setCustomerName(''); setCustomerPhone(''); setCustomerAddress(''); setStoreDevices([]); setDeviceSource('STORE'); setDeviceWarrantyStatus(null); setCustomerSearchTerm(''); setProductName(''); setSerialNumber(''); }} 
+                    className="absolute top-2 right-2 text-slate-400 hover:text-red-500 hidden group-hover:block transition-colors"
+                    title="Xóa khách hàng"
+                  >
+                    <X size={16} />
+                  </button>
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-400 shrink-0 bg-white shadow-sm">
+                      <User size={14} />
+                    </div>
+                    <div className="flex-1 overflow-hidden flex items-center justify-between gap-4">
+                      <div className="truncate">
+                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest leading-none mb-1">Khách hàng</p>
+                        <p className="text-sm font-bold text-slate-800 truncate">{selectedCustomerObj.name}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="flex items-center justify-end text-[12px]">
+                          <span className="text-slate-400 font-bold mr-1">ĐT:</span>
+                          <span className="text-slate-600 font-medium">{selectedCustomerObj.phone || '---'}</span>
+                        </div>
+                        <div className="flex items-center justify-end text-[11px] mt-0.5">
+                          <span className="text-slate-400 font-bold mr-1">Đ/C:</span>
+                          <span className="text-slate-500 font-medium truncate max-w-[150px]">{selectedCustomerObj.address || '---'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {selectedCustomerObj && (
+                <>
+                  <div className="bg-slate-50 p-4 border border-slate-200 rounded-xl">
+                <div className="flex items-center gap-4 mb-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="radio" 
+                      name="deviceSource" 
+                      checked={deviceSource === 'STORE'}
+                      onChange={() => setDeviceSource('STORE')}
+                      className="text-blue-600 focus:ring-blue-500 w-4 h-4"
+                    />
+                    <span className="text-sm font-bold text-slate-700 flex items-center gap-1.5"><ShoppingBag size={14} className="text-slate-400" /> Đã mua tại shop</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="radio" 
+                      name="deviceSource" 
+                      checked={deviceSource === 'EXTERNAL'}
+                      onChange={() => {
+                        setDeviceSource('EXTERNAL');
+                        setProductName('');
+                        setSerialNumber('');
+                      }}
+                      className="text-blue-600 focus:ring-blue-500 w-4 h-4"
+                    />
+                    <span className="text-sm font-bold text-slate-700 flex items-center gap-1.5"><Globe size={14} className="text-slate-400" /> Máy nơi khác</span>
+                  </label>
+                </div>
+
+                {deviceSource === 'STORE' ? (
+                  <div className="space-y-3">
+                    {storeDevices.length > 0 ? (
+                      <div>
+                        <label className="text-[9px] font-semibold text-slate-400 tracking-wider ml-1 mb-1 block">Chọn máy đã mua</label>
+                        <select 
+                          className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none shadow-sm focus:border-blue-400 text-slate-700"
+                          onChange={(e) => {
+                            if (!e.target.value) return;
+                            const idx = parseInt(e.target.value);
+                            const d = storeDevices[idx];
+                            if (d) {
+                               setProductName(d.name);
+                               setSerialNumber(d.sn || '');
+                               calculateWarranty(d.warrantyExpiry);
+                            }
+                          }}
+                          defaultValue=""
+                        >
+                          <option value="" disabled className="text-slate-400">-- Chọn thiết bị trong lịch sử mua hàng --</option>
+                          {storeDevices.map((d, idx) => {
+                            let dateStr = d.date;
+                            if (dateStr.includes(' ')) dateStr = dateStr.split(' ')[0];
+                            else if (dateStr.includes(',')) dateStr = dateStr.split(',')[0];
+                            
+                            return (
+                              <option key={idx} value={idx}>
+                                {d.name} {d.sn && `(SN: ${d.sn})`} - Mua: {dateStr}
+                              </option>
+                            );
+                          })}
+                        </select>
+
+                        {deviceWarrantyStatus && (
+                          <div className="mt-3 p-3 rounded-lg text-xs font-semibold flex flex-col gap-2 border bg-emerald-50 text-emerald-600 border-emerald-200">
+                            <div className="flex items-center gap-2">
+                              {deviceWarrantyStatus.isExpired ? <AlertCircle size={16} className="text-red-500 shrink-0" /> : <CheckCircle size={16} className="text-emerald-500 shrink-0" />}
+                              <span className={deviceWarrantyStatus.isExpired ? 'text-red-600' : ''}>{deviceWarrantyStatus.text}</span>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {(maintenanceRecords || []).find(r => r.serialNumber === serialNumber && r.status !== 'RETURNED' && serialNumber !== '') && (
+                          <div className="mt-2 p-3 bg-orange-50 border border-orange-200 text-orange-700 rounded-lg text-[11px] font-semibold flex items-start gap-2 shadow-sm animate-in zoom-in duration-200">
+                            <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                            <span>Thiết bị này đang trong trạng thái <strong>Bảo hành / Sửa chữa</strong> (chưa trả khách). Vui lòng kiểm tra lại trước khi tạo thêm.</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-white border border-dashed border-slate-300 rounded-lg text-center text-xs text-slate-500 italic">
+                        {customerName ? 'Khách hàng này chưa có lịch sử mua máy tại cửa hàng.' : 'Vui lòng chọn khách hàng để tra cứu lịch sử mua.'}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {!selectedExternalDeviceObj ? (
+                      <div className="relative">
+                        <label className="text-[9px] font-semibold text-slate-400 tracking-wider ml-1">Số Serial / Tên thiết bị</label>
+                        <input 
+                          type="text" 
+                          value={externalDeviceSearch}
+                          onFocus={() => {
+                            if (!externalDeviceSearch) handleExternalSearch('');
+                          }}
+                          onChange={(e) => handleExternalSearch(e.target.value)}
+                          className="w-full p-3 bg-white border border-slate-200 rounded-lg text-sm font-semibold outline-none shadow-sm focus:border-blue-400" 
+                          placeholder="Nhập Serial hoặc Tên máy để tìm..." 
+                        />
+                        {(externalDeviceSuggestions.length > 0 || (externalDeviceSearch && externalDeviceSuggestions.length === 0)) && (
+                          <div className="bg-white border border-slate-200 rounded-lg shadow-md mt-2 max-h-[40vh] flex flex-col overflow-hidden shrink-0">
+                            <div className="overflow-y-auto flex-1">
+                              {externalDeviceSuggestions.map((dev, idx) => (
+                                <div 
+                                  key={idx} 
+                                  onClick={() => handleSelectExternalDevice(dev)}
+                                  className="px-3 py-2.5 border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition-colors flex flex-col justify-center"
+                                >
+                                  <div className="flex items-center justify-between gap-3">
+                                    <p className="text-[13px] font-bold text-slate-800 truncate">{dev.product}</p>
+                                    {dev.sn && (
+                                      <span className="shrink-0 text-[10px] font-mono font-bold text-orange-600 bg-orange-50/80 px-1.5 py-0.5 rounded border border-orange-100">
+                                        {dev.sn}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {dev.source && <p className="text-[11px] text-slate-400 mt-0.5 truncate">Nơi bán: <span className="font-medium text-slate-500">{dev.source}</span></p>}
+                                </div>
+                              ))}
+                            </div>
+                            
+                            {externalDeviceSearch && externalDeviceSuggestions.length === 0 && (
+                              <div 
+                                onClick={() => {
+                                  setNewExtProduct('');
+                                  setNewExtSn(externalDeviceSearch);
+                                  setNewExtSource('');
+                                  setIsExternalModalOpen(true);
+                                  setExternalDeviceSuggestions([]);
+                                }}
+                                className="p-3 bg-blue-50 text-blue-700 font-bold text-sm text-center cursor-pointer hover:bg-blue-100 transition-colors border-t border-blue-100 flex items-center justify-center gap-2"
+                              >
+                                <Plus size={16} /> Thêm mới thiết bị "{externalDeviceSearch}"
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                      <div className="bg-white border text-left border-slate-200 rounded-lg p-3 py-2.5 relative group shadow-sm mt-1 flex items-center justify-between gap-3">
+                        <div className="flex-1 overflow-hidden">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-bold text-slate-700 truncate">{selectedExternalDeviceObj.product}</p>
+                            {selectedExternalDeviceObj.sn && (
+                              <div className="inline-flex shrink-0 items-center px-1.5 py-0.5 bg-orange-50 border border-orange-200 text-orange-600 font-mono font-bold text-[10px] rounded">
+                                {selectedExternalDeviceObj.sn}
+                              </div>
+                            )}
+                          </div>
+                          {selectedExternalDeviceObj.source && (
+                            <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                              Nơi bán: <span className="font-medium text-slate-500">{selectedExternalDeviceObj.source}</span>
+                            </div>
+                          )}
+                        </div>
+                        <button 
+                          onClick={() => {
+                            setSelectedExternalDeviceObj(null);
+                            setProductName('');
+                            setSerialNumber('');
+                            setExternalDeviceSearch('');
+                          }} 
+                          className="shrink-0 text-slate-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-full transition-colors"
+                          title="Chọn thiết bị khác"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                      
+                      {(maintenanceRecords || []).find(r => r.serialNumber === serialNumber && r.status !== 'RETURNED' && serialNumber !== '') && (
+                        <div className="mt-2 p-3 bg-orange-50 border border-orange-200 text-orange-700 rounded-lg text-[11px] font-semibold flex items-start gap-2 shadow-sm animate-in zoom-in duration-200">
+                          <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                          <span>Thiết bị này đang trong trạng thái <strong>Bảo hành / Sửa chữa</strong> (chưa trả khách). Vui lòng kiểm tra lại trước khi tạo thêm.</span>
+                        </div>
+                      )}
+                    </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="text-[9px] font-semibold text-slate-400 tracking-wider ml-1">Tình trạng / Lỗi</label>
+                <textarea 
+                  value={issue}
+                  onChange={(e) => setIssue(e.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none mt-1 shadow-inner focus:border-blue-400 h-20" 
+                  placeholder="Mô tả lỗi của máy..." 
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[9px] font-semibold text-slate-400 tracking-wider ml-1">Dự kiến chi phí (đ)</label>
+                  <input 
+                    type="text" 
+                    value={cost}
+                    onChange={(e) => setCost(formatNumber(parseFormattedNumber(e.target.value)))}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none mt-1 shadow-inner focus:border-blue-400" 
+                    placeholder="0" 
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">Ghi chú thêm</label>
+                <input 
+                  type="text" 
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none mt-1 shadow-inner focus:border-blue-400" 
+                  placeholder="Phụ kiện đi kèm, mật khẩu máy..." 
+                />
+              </div>
+              </>
+              )}
+            </div>
+            
+            {selectedCustomerObj && (
+              <div className="p-6 border-t border-slate-100 shrink-0">
+                <button 
+                  onClick={handleSave}
+                  className="w-full bg-blue-600 text-white py-3.5 rounded-lg font-semibold shadow-md shadow-blue-200 tracking-wide active:scale-95 transition-all hover:bg-blue-700"
+                >
+                  Tạo phiếu tiếp nhận
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Record Detail Modal */}
+      {selectedRecord && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md max-h-[90vh] flex flex-col rounded-xl shadow-2xl animate-in fade-in zoom-in duration-200 overflow-hidden">
+            <div className="flex justify-between items-center p-6 border-b border-slate-100 shrink-0">
+              <h3 className="text-lg font-bold text-slate-800 tracking-tight">Chi tiết phiếu {selectedRecord.id}</h3>
+              <div className="flex gap-2">
+                {!isEditingRecord ? (
+                  <button onClick={() => {
+                    setEditRecordData({
+                      customerName: selectedRecord.customerName,
+                      customerPhone: selectedRecord.customerPhone,
+                      productName: selectedRecord.productName,
+                      serialNumber: selectedRecord.serialNumber,
+                      issue: selectedRecord.issue
+                    });
+                    setIsEditingRecord(true);
+                  }} className="w-8 h-8 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 transition-colors flex items-center justify-center" title="Sửa thông tin">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                  </button>
+                ) : (
+                  <button onClick={() => {
+                    updateMaintenanceRecord(selectedRecord.id, editRecordData);
+                    setSelectedRecord({...selectedRecord, ...editRecordData});
+                    setIsEditingRecord(false);
+                  }} className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-full hover:bg-emerald-100 transition-colors flex items-center justify-center" title="Lưu thay đổi">
+                    <CheckCircle size={16} />
+                  </button>
+                )}
+                <button onClick={() => {
+                  setSelectedRecord(null);
+                  setIsEditingRecord(false);
+                }} className="w-8 h-8 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-200 transition-colors flex items-center justify-center">
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+            
+            <div className={`p-6 overflow-y-auto flex-1 no-scrollbar ${isEditingRecord ? 'space-y-4' : 'space-y-6'}`}>
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center shrink-0">
+                  <User size={24} />
+                </div>
+                <div className="flex-1">
+                  {!isEditingRecord ? (
+                    <>
+                      <p className="font-semibold text-slate-800 tracking-tight">{selectedRecord.customerName}</p>
+                      <p className="text-xs text-slate-500 font-medium">{selectedRecord.customerPhone}</p>
+                    </>
+                  ) : (
+                    <div className="space-y-2">
+                      <input type="text" className="w-full text-sm p-2 border border-slate-200 rounded focus:border-blue-400 outline-none" value={editRecordData.customerName || ''} onChange={e => setEditRecordData({...editRecordData, customerName: e.target.value})} placeholder="Tên KH" />
+                      <input type="text" className="w-full text-sm p-2 border border-slate-200 rounded focus:border-blue-400 outline-none" value={editRecordData.customerPhone || ''} onChange={e => setEditRecordData({...editRecordData, customerPhone: e.target.value})} placeholder="SĐT KH" />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <Tag className="text-slate-400 mt-0.5 shrink-0" size={16} />
+                  <div className="flex-1">
+                    <p className="text-[10px] font-bold text-slate-400 tracking-wider">Thiết bị</p>
+                    {!isEditingRecord ? (
+                      <>
+                        <p className="text-sm font-semibold text-slate-800">{selectedRecord.productName}</p>
+                        {selectedRecord.serialNumber && <p className="text-xs text-orange-500 font-semibold font-mono">SN: {selectedRecord.serialNumber}</p>}
+                      </>
+                    ) : (
+                      <div className="space-y-2 mt-1">
+                        <input type="text" className="w-full text-sm p-2 border border-slate-200 rounded focus:border-blue-400 outline-none" value={editRecordData.productName || ''} onChange={e => setEditRecordData({...editRecordData, productName: e.target.value})} placeholder="Tên thiết bị" />
+                        <input type="text" className="w-full text-sm p-2 border border-slate-200 rounded focus:border-blue-400 outline-none font-mono" value={editRecordData.serialNumber || ''} onChange={e => setEditRecordData({...editRecordData, serialNumber: e.target.value})} placeholder="Serial Number (không bắt buộc)" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="text-slate-400 mt-0.5 shrink-0" size={16} />
+                  <div className="flex-1">
+                    <p className="text-[10px] font-bold text-slate-400 tracking-wider">Tình trạng lỗi</p>
+                    {!isEditingRecord ? (
+                      <p className="text-sm font-medium text-slate-600">{selectedRecord.issue}</p>
+                    ) : (
+                      <textarea className="w-full text-sm p-2 border border-slate-200 rounded focus:border-blue-400 outline-none resize-none h-16 mt-1" value={editRecordData.issue || ''} onChange={e => setEditRecordData({...editRecordData, issue: e.target.value})} placeholder="Mô tả lỗi" />
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-start gap-3 w-full">
+                  <Clock className="text-slate-400 mt-0.5 shrink-0" size={16} />
+                  <div className="flex-1 w-full">
+                    <p className="text-[10px] font-bold text-slate-400 tracking-wider">Trạng thái hiện tại</p>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {(['RECEIVING', 'REPAIRING', 'COMPLETED', 'RETURNED'] as const).map(s => (
+                        <button 
+                          key={s}
+                          onClick={() => {
+                            if (selectedRecord.status !== s) {
+                              setStatusConfirmModal({ isOpen: true, newStatus: s, recordId: selectedRecord.id });
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-[8px] font-bold tracking-wide transition-all ${selectedRecord.status === s ? getStatusColor(s) + ' shadow-sm scale-105' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
+                        >
+                          {getStatusText(s)}
+                        </button>
+                      ))}
+                    </div>
+                    {['COMPLETED', 'RETURNED'].includes(selectedRecord.status) && (
+                      <div className="mt-3">
+                        <textarea
+                          placeholder="Nhập phản hồi/kết quả sửa chữa..."
+                          className="w-full text-sm p-3 border border-slate-200 rounded-lg outline-none focus:border-blue-400 bg-white"
+                          value={feedbackText}
+                          onChange={(e) => setFeedbackText(e.target.value)}
+                        />
+                        <div className="flex justify-end mt-2">
+                          <button 
+                            onClick={() => {
+                              updateMaintenanceRecord(selectedRecord.id, { feedback: feedbackText });
+                              setSelectedRecord({...selectedRecord, feedback: feedbackText});
+                              alert('Đã lưu phản hồi!');
+                            }}
+                            className="px-4 py-1.5 bg-blue-600 text-white rounded text-xs font-bold shadow-sm shadow-blue-200 hover:bg-blue-700 hover:-translate-y-0.5 transition-all"
+                          >
+                            Lưu phản hồi
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {selectedRecord.transferId && maintenanceTransfers?.find(t => t.id === selectedRecord.transferId) && (() => {
+                const trf = maintenanceTransfers.find(t => t.id === selectedRecord.transferId)!;
+                return (
+                  <div className="bg-violet-50 p-4 rounded-xl border border-violet-100 space-y-2 relative">
+                    <div className="absolute top-3 right-3">
+                      <span className="text-[10px] bg-violet-200 text-violet-800 px-2 py-0.5 rounded font-bold uppercase tracking-wide">
+                        {trf.status === 'TRANSFERRED' ? 'Đã chuyển tuyến' : trf.status}
+                      </span>
+                    </div>
+                    <div className="flex items-start gap-4">
+                       <ArrowLeftRight className="text-violet-500 mt-1" size={18} />
+                       <div className="flex-1 text-sm space-y-1">
+                          <p><span className="font-bold text-slate-500">Nơi nhận:</span> <span className="font-semibold text-slate-800">{trf.supplierName || '---'}</span></p>
+                          <p><span className="font-bold text-slate-500">Ngày đi:</span> <span className="text-slate-700">{toDMY(trf.transferDate)}</span></p>
+                          <p><span className="font-bold text-slate-500">Ngày về:</span> <span className="text-slate-700">{toDMY(trf.returnDate)}</span></p>
+                          {(trf.repairCost > 0 || trf.shippingCost > 0) && (
+                            <p className="flex items-center gap-3">
+                              {trf.repairCost > 0 && <span><span className="font-bold text-slate-500">Sửa:</span> <span className="text-orange-600 font-bold">{formatNumber(trf.repairCost)}đ</span></span>}
+                              {trf.shippingCost > 0 && <span><span className="font-bold text-slate-500">Ship:</span> <span className="text-blue-600 font-bold">{formatNumber(trf.shippingCost)}đ</span></span>}
+                            </p>
+                          )}
+                          {trf.note && (
+                            <p><span className="font-bold text-slate-500">Ghi chú:</span> <span className="text-slate-700">{trf.note}</span></p>
+                          )}
+                       </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 mt-2 pt-3 border-t border-violet-100/60">
+                      <button 
+                        onClick={() => {
+                          setTransferDest(trf.supplierName || '');
+                          setTransferAccessories(trf.accessories || '');
+                          setTransferActionStatus(trf.status as any || 'Đóng hàng');
+                          setTransferCost(trf.repairCost ? formatNumber(trf.repairCost) : '');
+                          setTransferShippingCost(trf.shippingCost ? formatNumber(trf.shippingCost) : '');
+                          setTransferDate(toYMD(trf.transferDate) || '');
+                          setTransferReturnDate(toYMD(trf.returnDate) || '');
+                          setTransferNote(trf.note || '');
+                          setIsTransferModalOpen(true);
+                        }}
+                        className="flex-1 py-2 bg-white text-violet-700 font-bold rounded text-[12px] flex items-center justify-center gap-2 hover:bg-violet-100 transition-colors border border-violet-200"
+                      >
+                        <ArrowLeftRight size={14} />
+                        Cập nhật Chuyển Tuyến
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {!selectedRecord.transferId && (
+                <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-100">
+                  <button 
+                    onClick={() => {
+                      setTransferDest('');
+                      setTransferAccessories('');
+                      setTransferActionStatus('Đóng hàng');
+                      setTransferCost('');
+                      setTransferShippingCost('');
+                      setTransferDate('');
+                      setTransferReturnDate('');
+                      setTransferNote('');
+                      setIsTransferModalOpen(true);
+                    }}
+                    className="flex-1 py-2.5 bg-violet-50 text-violet-700 font-bold rounded-lg text-[13px] flex items-center justify-center gap-2 hover:bg-violet-100 transition-colors border border-violet-100"
+                  >
+                    <ArrowLeftRight size={14} />
+                    Chuyển Tuyến
+                  </button>
+                </div>
+              )}
+
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <div className="flex flex-col gap-1 w-full">
+                  <span className="text-[10px] font-bold text-slate-500 tracking-wider">Chi phí dự kiến</span>
+                  <div className="flex items-center gap-2 relative w-full">
+                    <input 
+                      type="text"
+                      className="text-lg font-semibold text-slate-800 bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 outline-none w-full pb-1 pr-6"
+                      value={formatNumber(selectedRecord.cost)}
+                      onChange={(e) => {
+                        const val = parseFormattedNumber(e.target.value) || 0;
+                        updateMaintenanceRecord(selectedRecord.id, { cost: val });
+                        setSelectedRecord({...selectedRecord, cost: val});
+                      }}
+                    />
+                    <span className="text-lg font-semibold text-slate-800 absolute right-1 bottom-1.5 pointer-events-none">đ</span>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-slate-200">
+                  {selectedRecord.invoiceId ? (() => {
+                    const linkedInvoice = invoices?.find(inv => inv.id === selectedRecord.invoiceId);
+                    return (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-emerald-700 bg-emerald-50 px-2 py-1 rounded">
+                          <div className="flex items-center gap-1.5">
+                            <CheckCircle size={14} />
+                            <span className="text-xs font-semibold">Đã tạo đơn:</span>
+                          </div>
+                          <span 
+                            className="font-bold text-xs tracking-wide cursor-pointer hover:underline text-blue-600"
+                            onClick={() => {
+                              window.location.href = '/invoices'; // Tạm thời link sang tab Hóa đơn vì Maintenance ko mang theo Invoices Detail View Modal
+                            }}
+                          >
+                            {selectedRecord.invoiceId} &rarr;
+                          </span>
+                        </div>
+                        {linkedInvoice && (
+                          <div className="bg-white border border-slate-200 p-2 rounded-lg space-y-1">
+                            {linkedInvoice.items.map((item, idxx) => (
+                              <div key={idxx} className="flex justify-between items-center text-xs">
+                                <span className="text-slate-700 font-medium line-clamp-1 flex-1 pr-2">{item.qty}x {item.name}</span>
+                                <span className="text-slate-800 font-bold">{formatNumber(item.price * item.qty)}đ</span>
+                              </div>
+                            ))}
+                            <div className="flex justify-between items-center pt-1 mt-1 border-t border-dashed border-slate-200">
+                              <span className="text-[10px] font-bold text-slate-500 uppercase">Tổng H.Đơn</span>
+                              <span className="text-sm font-bold text-blue-600">{formatNumber(linkedInvoice.total)}đ</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })() : (
+                    <button
+                      onClick={() => setIsInvoiceModalOpen(true)}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 bg-blue-100 text-blue-700 font-bold rounded-lg text-sm hover:bg-blue-200 transition-colors"
+                    >
+                      <Plus size={16} /> Tạo đơn xuất bán
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-6 border-t border-slate-100 bg-slate-50/50 shrink-0">
+              <button onClick={() => setSelectedRecord(null)} className="w-full py-3 bg-slate-900 text-white font-semibold rounded-lg text-[10px] tracking-wide">Đóng chi tiết</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {statusConfirmModal.isOpen && selectedRecord && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-sm rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 border border-slate-200">
+            <div className="p-6">
+              <h3 className="text-lg font-bold text-slate-800 text-center mb-4">Xác nhận</h3>
+              <p className="text-sm text-slate-600 text-center mb-6">Bạn có đồng ý đổi trạng thái sang <strong className={`${getStatusColor(statusConfirmModal.newStatus)} px-1.5 py-0.5 rounded font-bold uppercase`}>{getStatusText(statusConfirmModal.newStatus)}</strong>?</p>
+              
+              <div className="bg-slate-50 p-4 rounded-lg space-y-3 border border-slate-100 mb-6">
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Khách hàng</p>
+                  <p className="text-sm font-semibold text-slate-700 leading-none">{selectedRecord.customerName}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Thiết bị</p>
+                  <p className="text-sm font-semibold text-slate-700 leading-none">{selectedRecord.productName}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Tình trạng lỗi</p>
+                  <p className="text-xs text-slate-600 break-words line-clamp-2">{selectedRecord.issue}</p>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setStatusConfirmModal({isOpen: false, newStatus: null, recordId: null})}
+                  className="flex-1 py-3 bg-white text-slate-600 border border-slate-200 rounded-lg text-sm font-semibold hover:bg-slate-50 transition-colors"
+                >
+                  Hủy bỏ
+                </button>
+                <button 
+                  onClick={() => {
+                    updateMaintenanceRecord(selectedRecord.id, { status: statusConfirmModal.newStatus });
+                    
+                    if (statusConfirmModal.newStatus === 'RETURNED' && selectedRecord.transferId) {
+                      const existingTransfer = maintenanceTransfers?.find(t => t.id === selectedRecord.transferId);
+                      if (existingTransfer) {
+                        updateMaintenanceTransfer(existingTransfer.id, { status: 'Hoàn thành nhận lại' });
+                      }
+                    }
+
+                    setSelectedRecord({...selectedRecord, status: statusConfirmModal.newStatus});
+                    setStatusConfirmModal({isOpen: false, newStatus: null, recordId: null});
+                  }}
+                  className="flex-1 py-3 bg-blue-600 text-white rounded-lg text-sm font-semibold shadow-md shadow-blue-200 hover:bg-blue-700 transition-colors"
+                >
+                  Đồng ý
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transfer Line Modal */}
+      {isTransferModalOpen && selectedRecord && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm pt-[5vh]">
+          <div className="bg-white w-full max-w-lg rounded-xl shadow-2xl flex flex-col max-h-[90vh] animate-in fade-in zoom-in duration-200 border border-slate-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2 text-[15px]">
+                <ArrowLeftRight size={18} className="text-violet-600" />
+                Chuyển tuyến bảo hành
+              </h3>
+              <button 
+                onClick={() => setIsTransferModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 bg-white p-1 rounded-full border border-slate-200"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto no-scrollbar space-y-4 flex-1">
+              <div className="relative">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Nơi chuyển đến</label>
+                <div className="flex gap-2">
+                  <select 
+                    value={transferDest}
+                    onChange={(e) => setTransferDest(e.target.value)}
+                    className="flex-1 p-3 bg-white border border-slate-200 rounded-lg text-sm font-semibold outline-none focus:border-violet-400" 
+                  >
+                    <option value="" disabled>-- Chọn nhà cung cấp/nơi nhận --</option>
+                    {suppliers?.map(s => (
+                      <option key={s.id} value={s.name}>{s.name}</option>
+                    ))}
+                  </select>
+                  <button 
+                    onClick={() => setIsTransferSupplierModalOpen(true)}
+                    className="px-3 bg-violet-100 text-violet-600 rounded-lg shrink-0 hover:bg-violet-200"
+                  >
+                    <Plus size={20} />
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Phụ kiện kèm theo</label>
+                <input 
+                  type="text" 
+                  value={transferAccessories}
+                  onChange={(e) => setTransferAccessories(e.target.value)}
+                  className="w-full p-3 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-violet-400" 
+                  placeholder="Sạc, cáp, hộp..." 
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Trạng thái chuyển tuyến</label>
+                <select 
+                  value={transferActionStatus}
+                  onChange={(e) => setTransferActionStatus(e.target.value as any)}
+                  className="w-full p-3 bg-white border border-slate-200 rounded-lg text-sm font-semibold outline-none focus:border-violet-400 text-slate-700" 
+                >
+                  <option value="Đóng hàng">Đóng hàng</option>
+                  <option value="Đã chuyển">Đã chuyển</option>
+                  <option value="Xử lý xong">Xử lý xong</option>
+                  <option value="Hoàn thành nhận lại">Hoàn thành nhận lại</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Ngày chuyển</label>
+                  <input 
+                    type="date" 
+                    value={transferDate}
+                    onChange={(e) => setTransferDate(e.target.value)}
+                    className="w-full p-3 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-violet-400" 
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1.5 ml-1 select-none">Định dạng hiển thị: <span className="font-semibold text-slate-600">{toDMY(transferDate)}</span></p>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Ngày dự kiến về</label>
+                  <input 
+                    type="date" 
+                    value={transferReturnDate}
+                    onChange={(e) => setTransferReturnDate(e.target.value)}
+                    className="w-full p-3 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-violet-400" 
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1.5 ml-1 select-none">Định dạng hiển thị: <span className="font-semibold text-slate-600">{toDMY(transferReturnDate)}</span></p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Chi phí sửa chữa (đ)</label>
+                  <input 
+                    type="text" 
+                    value={transferCost}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^0-9]/g, '');
+                      setTransferCost(formatNumber(Number(val)));
+                    }}
+                    className="w-full p-3 bg-white border border-slate-200 rounded-lg text-sm font-semibold outline-none focus:border-violet-400" 
+                    placeholder="0" 
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Chi phí vận chuyển (đ)</label>
+                  <input 
+                    type="text" 
+                    value={transferShippingCost}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^0-9]/g, '');
+                      setTransferShippingCost(formatNumber(Number(val)));
+                    }}
+                    className="w-full p-3 bg-white border border-slate-200 rounded-lg text-sm font-semibold text-orange-600 outline-none focus:border-violet-400" 
+                    placeholder="0" 
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Ghi chú thêm</label>
+                <textarea 
+                  value={transferNote}
+                  onChange={(e) => setTransferNote(e.target.value)}
+                  className="w-full p-3 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-violet-400 resize-none h-20" 
+                  placeholder="Nhập ghi chú chuyển tuyến..." 
+                />
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-slate-100 flex gap-3 shrink-0">
+              <button 
+                onClick={() => setIsTransferModalOpen(false)}
+                className="flex-1 py-3 bg-white text-slate-600 font-semibold rounded-lg text-xs border border-slate-200 hover:bg-slate-50 transition-colors"
+              >
+                Hủy
+              </button>
+              <button 
+                onClick={() => {
+                  if (!transferDest) {
+                    alert('Vui lòng chọn hoặc nhập Nơi chuyển đến.');
+                    return;
+                  }
+                  if (!transferAccessories) {
+                    alert('Vui lòng nhập Phụ kiện kèm theo.');
+                    return;
+                  }
+
+                  const existingTransfer = maintenanceTransfers?.find(t => t.id === selectedRecord.transferId);
+                  
+                  if (existingTransfer) {
+                    updateMaintenanceTransfer(existingTransfer.id, {
+                      supplierName: transferDest,
+                      accessories: transferAccessories,
+                      status: transferActionStatus,
+                      repairCost: parseFormattedNumber(transferCost) || 0,
+                      shippingCost: parseFormattedNumber(transferShippingCost) || 0,
+                      transferDate: toYMD(transferDate), // Save as safe YMD
+                      returnDate: toYMD(transferReturnDate),
+                      note: transferNote
+                    });
+                    
+                    updateMaintenanceRecord(selectedRecord.id, { status: 'REPAIRING' });
+                    setSelectedRecord({...selectedRecord, status: 'REPAIRING'});
+                  } else {
+                    const newId = generateId('TRF', maintenanceTransfers || []);
+                    const newTransfer = {
+                      id: newId,
+                      maintenanceRecordId: selectedRecord.id,
+                      supplierName: transferDest,
+                      accessories: transferAccessories,
+                      status: transferActionStatus,
+                      repairCost: parseFormattedNumber(transferCost) || 0,
+                      shippingCost: parseFormattedNumber(transferShippingCost) || 0,
+                      transferDate: toYMD(transferDate), // Save safe YMD
+                      returnDate: toYMD(transferReturnDate),
+                      note: transferNote
+                    };
+                    addMaintenanceTransfer(newTransfer);
+                    updateMaintenanceRecord(selectedRecord.id, { transferId: newId, status: 'REPAIRING' });
+                    setSelectedRecord({...selectedRecord, transferId: newId, status: 'REPAIRING'});
+                  }
+                  
+                  setIsTransferModalOpen(false);
+                }}
+                className="flex-[2] py-3 bg-violet-600 text-white font-semibold rounded-lg text-xs shadow-md shadow-violet-200 hover:bg-violet-700 transition-colors"
+              >
+                Lưu thông tin
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add External Serial Modal */}
+      {isExternalModalOpen && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-0 md:p-4">
+          <div className="bg-white md:rounded-2xl shadow-xl w-full h-full md:h-auto md:max-w-sm flex flex-col md:overflow-hidden border border-slate-200">
+            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                <Globe size={16} className="text-blue-600" />
+                Thêm máy ngoài
+              </h3>
+              <button onClick={() => setIsExternalModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-2">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-5 flex-1 overflow-y-auto no-scrollbar space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Tên sản phẩm *</label>
+                <input 
+                  type="text" 
+                  value={newExtProduct}
+                  onChange={(e) => setNewExtProduct(e.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none mt-1 focus:border-blue-400" 
+                  placeholder="Ex: iPhone 12 Pro..." 
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Số Serial / IMEI</label>
+                <input 
+                  type="text" 
+                  value={newExtSn}
+                  onChange={(e) => setNewExtSn(e.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none mt-1 focus:border-blue-400" 
+                  placeholder="Nhập SN/IMEI nếu có..." 
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nơi bán / Nguồn gốc</label>
+                <input 
+                  type="text" 
+                  value={newExtSource}
+                  onChange={(e) => setNewExtSource(e.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none mt-1 focus:border-blue-400" 
+                  placeholder="FPT Shop, TGDĐ..." 
+                />
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-slate-100 flex gap-3 shrink-0 mb-4 md:mb-0">
+              <button 
+                onClick={() => setIsExternalModalOpen(false)} 
+                className="flex-1 py-3 bg-white text-slate-600 font-semibold rounded-lg text-xs border border-slate-200 hover:bg-slate-50"
+              >
+                Hủy
+              </button>
+              <button 
+                onClick={handleAddExternalSerial}
+                className="flex-[2] py-3 bg-blue-600 text-white font-semibold rounded-lg text-xs hover:bg-blue-700 shadow shadow-blue-200"
+              >
+                Lưu vào danh sách
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Add Customer Modal */}
+      {isCustomerModalOpen && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-0 md:p-4">
+          <div className="bg-white md:rounded-2xl shadow-xl w-full h-full md:h-auto md:max-w-sm flex flex-col md:overflow-hidden border border-slate-200">
+            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                <User size={16} className="text-blue-600" />
+                Thêm mới khách hàng
+              </h3>
+              <button onClick={() => setIsCustomerModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-2">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-5 flex-1 overflow-y-auto no-scrollbar space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Tên khách hàng *</label>
+                <input 
+                  type="text" 
+                  value={newCustomerName}
+                  onChange={(e) => setNewCustomerName(e.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none mt-1 focus:border-blue-400" 
+                  placeholder="Nhập tên..." 
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Số điện thoại</label>
+                <input 
+                  type="text" 
+                  value={newCustomerPhone}
+                  onChange={(e) => setNewCustomerPhone(e.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none mt-1 focus:border-blue-400" 
+                  placeholder="Nhập số điện thoại..." 
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Địa chỉ</label>
+                <input 
+                  type="text" 
+                  value={newCustomerAddress}
+                  onChange={(e) => setNewCustomerAddress(e.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none mt-1 focus:border-blue-400" 
+                  placeholder="Nhập địa chỉ..." 
+                />
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-slate-100 flex gap-3 shrink-0 mb-4 md:mb-0">
+              <button 
+                onClick={() => setIsCustomerModalOpen(false)} 
+                className="flex-1 py-3 bg-white text-slate-600 font-semibold rounded-lg text-xs border border-slate-200 hover:bg-slate-50"
+              >
+                Hủy
+              </button>
+              <button 
+                onClick={handleAddCustomer}
+                className="flex-[2] py-3 bg-blue-600 text-white font-semibold rounded-lg text-xs hover:bg-blue-700 shadow shadow-blue-200"
+              >
+                Lưu khách hàng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Add Supplier Modal from Transfer Info */}
+      {isTransferSupplierModalOpen && (
+        <div className="fixed inset-0 z-[300] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-0 md:p-4">
+          <div className="bg-white justify-center md:rounded-2xl shadow-xl w-full h-full md:h-auto md:max-w-sm flex flex-col md:overflow-hidden border border-slate-200">
+            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                <Globe size={16} className="text-violet-600" />
+                Thêm nhà cung cấp mới
+              </h3>
+              <button onClick={() => setIsTransferSupplierModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-2">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-5 flex-1 overflow-y-auto no-scrollbar space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Tên nhà cung cấp *</label>
+                <input 
+                  type="text" 
+                  value={newTransferSupplierName}
+                  onChange={(e) => setNewTransferSupplierName(e.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none mt-1 focus:border-violet-400" 
+                  placeholder="Nhập tên NCC..." 
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Số điện thoại</label>
+                <input 
+                  type="text" 
+                  value={newTransferSupplierPhone}
+                  onChange={(e) => setNewTransferSupplierPhone(e.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none mt-1 focus:border-violet-400" 
+                  placeholder="Nhập SĐT..." 
+                />
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-slate-100 flex gap-3 shrink-0 mb-4 md:mb-0">
+              <button 
+                onClick={() => setIsTransferSupplierModalOpen(false)} 
+                className="flex-1 py-3 bg-white text-slate-600 font-semibold rounded-lg text-xs border border-slate-200 hover:bg-slate-50"
+              >
+                Hủy
+              </button>
+              <button 
+                onClick={() => {
+                  if (!newTransferSupplierName.trim()) return;
+                  const newSupp = {
+                    id: generateId('SUP', suppliers || []),
+                    name: newTransferSupplierName.trim(),
+                    phone: newTransferSupplierPhone.trim(),
+                    email: '',
+                    address: '',
+                    group: 'Đối tác bảo hành'
+                  };
+                  addSupplier(newSupp);
+                  setTransferDest(newSupp.name);
+                  setNewTransferSupplierName('');
+                  setNewTransferSupplierPhone('');
+                  setIsTransferSupplierModalOpen(false);
+                }}
+                className="flex-[2] py-3 bg-violet-600 text-white font-semibold rounded-lg text-xs hover:bg-violet-700 shadow shadow-violet-200"
+              >
+                Lưu lại
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Invoice from Maintenance Modal */}
+      {isInvoiceModalOpen && selectedRecord && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm pt-[5vh]">
+          <div className="bg-white w-full max-w-lg rounded-xl shadow-2xl flex flex-col max-h-[90vh] animate-in fade-in zoom-in duration-200 border border-slate-200">
+            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                <FileText size={18} className="text-blue-600" />
+                Tạo đơn xuất bán / Thanh toán
+              </h3>
+              <button onClick={() => setIsInvoiceModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 bg-white rounded-full border border-slate-200">
+                <X size={16} />
+              </button>
+            </div>
+            
+            <div className="p-4 flex-1 overflow-y-auto no-scrollbar space-y-4">
+              {/* Product search */}
+              <div className="relative">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Thêm sản phẩm / Dịch vụ</label>
+                <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg p-1.5 focus-within:border-blue-400">
+                  <Search className="text-slate-400 ml-2 shrink-0" size={16} />
+                  <input
+                    type="text"
+                    value={invoiceSearchTerm}
+                    onChange={e => setInvoiceSearchTerm(e.target.value)}
+                    className="w-full p-2 bg-transparent text-sm font-medium outline-none"
+                    placeholder="Tìm sản phẩm..."
+                  />
+                </div>
+                {invoiceSearchTerm.trim() && (
+                  <div className="absolute top-full left-0 right-0 z-50 bg-white border border-slate-200 shadow-lg rounded-lg mt-1 max-h-40 flex flex-col overflow-y-auto">
+                    {products?.filter(p => p.name.toLowerCase().includes(invoiceSearchTerm.toLowerCase())).length > 0 ? (
+                      products.filter(p => p.name.toLowerCase().includes(invoiceSearchTerm.toLowerCase())).slice(0, 20).map(p => (
+                        <div 
+                          key={p.id}
+                          className="p-2 border-b border-slate-50 hover:bg-slate-50 cursor-pointer flex justify-between items-center"
+                          onClick={() => {
+                            addInvoiceItem(p);
+                          }}
+                        >
+                          <span className="text-sm font-semibold">{p.name}</span>
+                          <span className="text-xs text-blue-600 font-bold">{formatNumber(p.price)}đ</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div 
+                        className="p-3 text-center text-xs text-blue-600 font-medium cursor-pointer hover:bg-slate-50"
+                        onClick={() => {
+                          setInvoiceItems(prev => [...prev, { id: 'SP_KHAC', name: invoiceSearchTerm, price: 0, qty: 1 }]);
+                          setInvoiceSearchTerm('');
+                        }}
+                      >
+                        + Thêm dịch vụ/tên "{invoiceSearchTerm}"
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Items List */}
+              {invoiceItems.length > 0 && (
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 space-y-2">
+                  {invoiceItems.map((item, idx) => (
+                    <div key={idx} className="flex flex-wrap items-center gap-2 bg-white p-2 rounded border border-slate-100">
+                      <div className="flex-1 min-w-[120px]">
+                        <p className="text-sm font-semibold text-slate-800 line-clamp-1">{item.name}</p>
+                        {item.serials && item.serials.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {item.serials.map((s: string) => (
+                              <span key={s} className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono flex items-center gap-1 border border-slate-200">
+                                {s}
+                                <X 
+                                  size={10} 
+                                  className="cursor-pointer hover:text-red-500" 
+                                  onClick={() => {
+                                    setInvoiceItems(prev => prev.map(vi => {
+                                      if (vi.id === item.id) {
+                                        const newSerials = vi.serials.filter((vs: string) => vs !== s);
+                                        if (newSerials.length === 0) return null;
+                                        return { ...vi, qty: newSerials.length, serials: newSerials };
+                                      }
+                                      return vi;
+                                    }).filter(Boolean));
+                                  }} 
+                                />
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button 
+                          onClick={() => {
+                            if (item.hasSerial) return; // Prevent manual qty decrease for serials
+                            setInvoiceItems(prev => prev.map((vi, i) => i === idx ? {...vi, qty: Math.max(1, vi.qty - 1)} : vi))
+                          }} 
+                          className={`w-6 h-6 bg-slate-100 rounded text-slate-600 font-bold hover:bg-slate-200 ${item.hasSerial ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >-</button>
+                        <input type="text" value={item.qty} readOnly className="w-8 text-center text-sm font-semibold bg-transparent outline-none" />
+                        <button 
+                          onClick={() => {
+                            if (item.hasSerial) {
+                              setActiveSerialProduct(products.find(p => p.id === item.id));
+                              setIsSerialModalOpen(true);
+                              return;
+                            }
+                            const p = products.find(prod => prod.id === item.id);
+                            if (p && !p.isService && item.qty >= (p.stock || 0)) {
+                              alert("Không đủ số lượng tồn kho!");
+                              return;
+                            }
+                            setInvoiceItems(prev => prev.map((vi, i) => i === idx ? {...vi, qty: vi.qty + 1} : vi))
+                          }} 
+                          className="w-6 h-6 bg-slate-100 rounded text-slate-600 font-bold hover:bg-slate-200"
+                        >+</button>
+                      </div>
+                      <div className="w-24">
+                        <input 
+                          type="text" 
+                          value={formatNumber(item.price)} 
+                          onChange={e => {
+                            const val = parseFormattedNumber(e.target.value) || 0;
+                            setInvoiceItems(prev => prev.map((vi, i) => i === idx ? {...vi, price: val} : vi));
+                          }}
+                          className="w-full text-right text-sm font-bold text-blue-600 bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 outline-none pb-0.5"
+                        />
+                      </div>
+                      <button onClick={() => setInvoiceItems(prev => prev.filter((_, i) => i !== idx))} className="text-slate-400 hover:text-red-500 p-1">
+                        <X size={16} />
+                      </button>
+                    </div>
+                  ))}
+                  
+                  <div className="flex justify-between items-center px-2 pt-2 border-t border-slate-200 mt-2">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Tổng tiền</span>
+                    <span className="text-lg font-bold text-slate-800">
+                      {formatNumber(invoiceItems.reduce((acc, item) => acc + item.price * item.qty, 0))}đ
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Payment */}
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Khách thanh toán (đ)</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={invoicePaid}
+                    onChange={(e) => setInvoicePaid(formatNumber(parseFormattedNumber(e.target.value) || 0))}
+                    className="w-full p-3 bg-white border border-slate-200 rounded-lg text-lg font-bold outline-none focus:border-blue-400 text-right pr-8"
+                    placeholder="0"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 font-bold text-slate-500">đ</span>
+                </div>
+                <div className="flex justify-end gap-2 mt-2">
+                  <button onClick={() => setInvoicePaid(formatNumber(invoiceItems.reduce((acc, item) => acc + item.price * item.qty, 0)))} className="px-2 py-1 bg-slate-100 border border-slate-200 text-slate-600 rounded text-xs font-semibold hover:bg-slate-200">Ghi nhận nhanh: Thanh toán đủ</button>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex gap-3 shrink-0">
+               <button onClick={() => setIsInvoiceModalOpen(false)} className="flex-1 py-3 bg-white text-slate-600 font-bold rounded-lg border border-slate-200 hover:bg-slate-50">Hủy</button>
+               <button 
+                onClick={async () => {
+                  if (invoiceItems.length === 0) {
+                    alert('Vui lòng thêm sản phẩm / dịch vụ!');
+                    return;
+                  }
+                  
+                  const invoiceTotal = invoiceItems.reduce((acc, item) => acc + item.price * item.qty, 0);
+                  const paidVal = parseFormattedNumber(invoicePaid) || 0;
+                  const newId = generateId('HD', invoices || []);
+
+                  const newInvoice = {
+                    id: newId,
+                    date: new Date().toLocaleString('vi-VN'),
+                    customer: selectedRecord?.customerName || 'Khách lẻ',
+                    phone: selectedRecord?.customerPhone || '',
+                    total: invoiceTotal,
+                    paid: paidVal,
+                    debt: invoiceTotal - paidVal,
+                    items: invoiceItems.map(i => ({...i, sn: i.serials?.join(', ') || undefined, importPriceTotal: 0})),
+                    paymentMethod: 'CASH',
+                    note: `Thanh toán sửa chữa phiếu ${selectedRecord?.id}`
+                  };
+
+                  await addInvoice(newInvoice as any);
+                  await updateMaintenanceRecord(selectedRecord!.id, { invoiceId: newId });
+                  setSelectedRecord({ ...selectedRecord!, invoiceId: newId });
+
+                  setIsInvoiceModalOpen(false);
+                  setInvoiceItems([]);
+                  setInvoicePaid('');
+                  setInvoiceSearchTerm('');
+                  
+                  // Optional alert to guide user
+                  const wantToSwitch = window.confirm(`Đã tạo Hóa đơn (ID: ${newId}). Bạn có muốn chuyển qua Trang Hóa đơn để xem chi tiết / in không?`);
+                  if (wantToSwitch) {
+                    window.location.href = '/invoices';
+                  }
+                }}
+                className="flex-[2] py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 shadow shadow-blue-200"
+               >
+                 Tạo đơn ({invoiceItems.length} mục)
+               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Serial Selection Modal */}
+      {isSerialModalOpen && activeSerialProduct && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm print:hidden">
+          <div className="bg-white w-full max-w-md rounded-xl shadow-2xl overflow-hidden">
+            <div className="flex justify-between items-center p-6 border-b border-slate-100">
+              <h3 className="text-lg font-bold text-slate-800 tracking-tighter">Chọn IMEI/Serial</h3>
+              <button onClick={() => setIsSerialModalOpen(false)} className="w-8 h-8 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-200 flex items-center justify-center">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-6 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                <div className="w-10 h-10 bg-white rounded-lg border border-slate-200 flex items-center justify-center shadow-sm">
+                  <Tag size={20} className="text-slate-400" />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-800 line-clamp-1">{activeSerialProduct.name}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Mã: SP{activeSerialProduct.id}</p>
+                </div>
+              </div>
+              
+              <div className="space-y-2 max-h-60 overflow-y-auto no-scrollbar pr-2 mb-4">
+                {serials?.filter(s => s.prodId === activeSerialProduct.id && s.status === 'IN_STOCK').length > 0 ? (
+                  serials.filter(s => s.prodId === activeSerialProduct.id && s.status === 'IN_STOCK').map(s => {
+                    const isSelected = invoiceItems.find(i => i.id === activeSerialProduct.id)?.serials?.includes(s.sn) || false;
+                    return (
+                      <div 
+                        key={s.sn} 
+                        className={`flex justify-between items-center p-3 rounded-lg border cursor-pointer transition-all ${isSelected ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200 hover:border-blue-300 hover:shadow-sm'}`}
+                        onClick={() => {
+                          if (isSelected) {
+                            alert("Serial này đã được chọn!");
+                            return;
+                          }
+                          addInvoiceItem(activeSerialProduct, s.sn);
+                          setIsSerialModalOpen(false);
+                        }}
+                      >
+                        <span className={`font-mono text-sm uppercase tracking-wider ${isSelected ? 'text-blue-700 font-bold' : 'text-slate-700 font-semibold'}`}>{s.sn}</span>
+                        {isSelected && <CheckCircle size={16} className="text-blue-600" />}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="text-center py-8">
+                    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <ShoppingBag size={24} className="text-slate-300" />
+                    </div>
+                    <p className="text-slate-500 text-sm font-medium">Không có Serial nào sẵn sàng xuất bán</p>
+                  </div>
+                )}
+              </div>
+              <button onClick={() => setIsSerialModalOpen(false)} className="w-full py-3 bg-slate-900 text-white font-semibold rounded-lg text-sm tracking-wide shadow-md shadow-slate-200">Xong</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
