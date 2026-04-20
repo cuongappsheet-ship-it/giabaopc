@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { Search, UserPlus, User, X, FileText, Calendar, Wallet, ChevronRight, CreditCard, Hash, Printer, Settings, HelpCircle, List, MoreHorizontal, Send, Download, SlidersHorizontal, Plus, Edit3, ChevronLeft } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { Customer, Invoice, CashTransaction } from '../types';
-import { formatNumber } from '../lib/utils';
+import { formatNumber, parseFormattedNumber } from '../lib/utils';
 import { generateId } from '../lib/idUtils';
 import { PrintTemplate } from '../components/PrintTemplate';
+import { useScrollLock } from '../hooks/useScrollLock';
 
 export const Customers: React.FC = () => {
   const { customers, addCustomer, updateCustomer, invoices, updateInvoice, addCashTransaction, returnSalesOrders, currentUser, cashTransactions } = useAppContext();
@@ -45,6 +46,9 @@ export const Customers: React.FC = () => {
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentType, setPaymentType] = useState<'ALL' | 'SINGLE'>('ALL');
   const [targetInvoiceId, setTargetInvoiceId] = useState<string | null>(null);
+
+  // Lock scroll when modals are open
+  useScrollLock(isModalOpen || !!selectedCustomer || !!selectedInvoice || isPaymentModalOpen);
 
   const filteredCustomers = (customers || []).filter(c => 
     (c.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -117,6 +121,9 @@ export const Customers: React.FC = () => {
     const totalSpent = customerInvoices.reduce((sum, inv) => sum + inv.total, 0);
     const totalReturned = customerReturns.reduce((sum, ret) => sum + ret.total, 0);
     const totalDebt = customerInvoices.reduce((sum, inv) => sum + (inv.debt || 0), 0);
+    const totalPaid = customerInvoices.reduce((sum, inv) => sum + (inv.paid || 0), 0);
+    const avgPerOrder = customerInvoices.length > 0 ? totalSpent / customerInvoices.length : 0;
+    const paymentRate = totalSpent > 0 ? (totalPaid / totalSpent) * 100 : 0;
     
     const sortedInvoices = [...customerInvoices].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     const lastInvoiceDate = sortedInvoices[0]?.date;
@@ -141,6 +148,8 @@ export const Customers: React.FC = () => {
       total: totalSpent,
       netTotal: totalSpent - totalReturned,
       debt: totalDebt,
+      avgPerOrder,
+      paymentRate,
       debtDays,
       lastTransaction,
       invoices: sortedInvoices
@@ -150,13 +159,13 @@ export const Customers: React.FC = () => {
   const handleOpenPaymentModal = (type: 'ALL' | 'SINGLE', invoiceId: string | null = null, defaultAmount: number = 0) => {
     setPaymentType(type);
     setTargetInvoiceId(invoiceId);
-    setPaymentAmount(defaultAmount.toString());
+    setPaymentAmount(formatNumber(defaultAmount));
     setPaymentDate(new Date().toISOString().split('T')[0]);
     setIsPaymentModalOpen(true);
   };
 
   const executePayment = () => {
-    const payValue = parseInt(paymentAmount);
+    const payValue = parseFormattedNumber(paymentAmount);
     if (isNaN(payValue) || payValue <= 0) return alert('Số tiền không hợp lệ');
 
     const transactionId = generateId('PT', cashTransactions);
@@ -220,53 +229,36 @@ export const Customers: React.FC = () => {
   };
 
   return (
-    <div className="h-full flex flex-col px-4 md:px-0 py-4 md:py-0">
+    <div className="flex flex-col px-4 md:px-0 py-4 md:py-0">
       {/* Print Template Container */}
       {printData && <PrintTemplate {...printData} />}
 
       <div className="flex flex-col md:flex-row md:items-center gap-4 mb-4 shrink-0 justify-between">
-        <div className="flex items-center gap-2 bg-white px-3 py-2 rounded border border-slate-200 shadow-sm w-[300px]">
+        <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-sm w-full md:w-[300px] focus-within:border-blue-400 transition-all">
           <Search className="text-slate-400" size={16} />
           <input 
             type="text" 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Theo mã, tên, số điện thoại" 
-            className="flex-1 bg-transparent text-sm outline-none"
+            className="flex-1 bg-transparent text-sm font-medium outline-none"
           />
           <SlidersHorizontal className="text-slate-400 cursor-pointer" size={16} />
         </div>
         
-        <div className="flex items-center gap-2">
+        <div className="hidden md:flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 scrollbar-hide">
           <button 
             onClick={() => { resetForm(); setIsModalOpen(true); }}
-            className="px-4 py-2 bg-white text-blue-600 border border-blue-600 rounded font-medium text-sm flex items-center gap-2 hover:bg-blue-50 transition-colors"
+            className="px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm items-center gap-2 hover:bg-blue-700 transition-all shadow-md shadow-blue-100 flex"
           >
             <Plus size={16} /> Khách hàng
-          </button>
-          <button className="px-4 py-2 bg-white text-slate-700 border border-slate-200 rounded font-medium text-sm flex items-center gap-2 hover:bg-slate-50 transition-colors">
-            <Send size={16} /> Gửi tin nhắn <ChevronRight size={14} className="rotate-90" />
-          </button>
-          <button className="px-4 py-2 bg-white text-slate-700 border border-slate-200 rounded font-medium text-sm flex items-center gap-2 hover:bg-slate-50 transition-colors">
-            <Download size={16} /> Import file
-          </button>
-          <button className="px-3 py-2 bg-white text-slate-700 border border-slate-200 rounded flex items-center justify-center hover:bg-slate-50 transition-colors">
-            <MoreHorizontal size={16} />
-          </button>
-          <button className="px-3 py-2 bg-white text-slate-700 border border-slate-200 rounded flex items-center justify-center hover:bg-slate-50 transition-colors">
-            <List size={16} />
-          </button>
-          <button className="px-3 py-2 bg-white text-slate-700 border border-slate-200 rounded flex items-center justify-center hover:bg-slate-50 transition-colors">
-            <Settings size={16} />
-          </button>
-          <button className="px-3 py-2 bg-white text-slate-700 border border-slate-200 rounded flex items-center justify-center hover:bg-slate-50 transition-colors">
-            <HelpCircle size={16} />
           </button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto bg-white border border-slate-200 rounded-sm">
-        <table className="w-full text-left border-collapse min-w-[1000px]">
+      <div className="flex-1 bg-white md:border border-slate-200 md:rounded-xl md:shadow-sm">
+        {/* Desktop Table */}
+        <table className="w-full text-left border-collapse min-w-[1000px] hidden md:table">
           <thead className="bg-[#f0f4f8] sticky top-0 z-10">
             <tr>
               <th className="p-3 w-12 text-center border-b border-slate-200">
@@ -347,6 +339,43 @@ export const Customers: React.FC = () => {
             )}
           </tbody>
         </table>
+
+        {/* Mobile Card List */}
+        <div className="md:hidden divide-y divide-slate-100">
+          {paginatedCustomers.length === 0 ? (
+            <div className="p-10 text-center text-slate-400 italic text-sm">Chưa có khách hàng.</div>
+          ) : (
+            paginatedCustomers.map((c, idx) => {
+              const stats = getCustomerStats(c);
+              return (
+                <div 
+                  key={idx} 
+                  onClick={() => setSelectedCustomer(c)}
+                  className="p-4 active:bg-slate-50 transition-colors"
+                >
+                  <div className="flex justify-between items-start mb-1">
+                    <h4 className="font-bold text-slate-900">{c.name}</h4>
+                    <span className={`text-sm font-bold ${stats.debt > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                      {formatNumber(stats.debt)}đ
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-0.5">
+                      <p className="text-xs text-slate-500 font-medium">{c.phone}</p>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">{c.location || 'Chưa định vị'}</p>
+                    </div>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleEdit(c); }}
+                      className="w-8 h-8 flex items-center justify-center bg-blue-50 text-blue-600 rounded-lg"
+                    >
+                      <Edit3 size={14} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
 
       {/* Pagination UI */}
@@ -391,8 +420,8 @@ export const Customers: React.FC = () => {
 
       {/* Customer Detail Modal */}
       {selectedCustomer && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm print:hidden">
-          <div className="bg-slate-50 w-full max-w-4xl h-[90vh] rounded-xl shadow-2xl overflow-hidden flex flex-col">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center md:p-4 p-0 bg-slate-900/50 backdrop-blur-sm print:hidden">
+          <div className="bg-slate-50 w-full max-w-4xl h-full md:h-[90vh] md:rounded-xl rounded-none shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-bottom-4 duration-300">
             <div className="bg-white p-6 border-b border-slate-200 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-pink-600 rounded-lg flex items-center justify-center text-white shadow-lg">
@@ -424,41 +453,53 @@ export const Customers: React.FC = () => {
                 const stats = getCustomerStats(selectedCustomer);
                 return (
                   <>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-                      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                        <div className="flex items-center gap-3 text-blue-600 mb-2">
-                          <FileText size={18} />
-                          <span className="text-[10px] font-black uppercase tracking-widest">Tổng hóa đơn</span>
-                        </div>
-                        <p className="text-2xl font-black text-slate-800 tracking-tighter">{stats.count} <span className="text-sm text-slate-400">đơn</span></p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-6">
+                      <div className="bg-[#f0f7ff] p-2.5 rounded-lg flex flex-col justify-between h-[72px]">
+                        <span className="text-[10px] font-bold text-blue-600">Tổng đơn</span>
+                        <p className="text-lg font-bold text-blue-700 leading-none">{stats.count}</p>
                       </div>
-                      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                        <div className="flex items-center gap-3 text-emerald-600 mb-2">
-                          <Wallet size={18} />
-                          <span className="text-[10px] font-black uppercase tracking-widest">Tổng bán (Net)</span>
-                        </div>
-                        <p className="text-2xl font-black text-slate-800 tracking-tighter">{formatNumber(stats.netTotal)} <span className="text-sm text-slate-400">đ</span></p>
+                      
+                      <div className="bg-[#f0fff4] p-2.5 rounded-lg flex flex-col justify-between h-[72px]">
+                        <span className="text-[10px] font-bold text-emerald-600">Tổng mua</span>
+                        <p className="text-lg font-bold text-emerald-700 leading-none">
+                          {formatNumber(stats.total)} <span className="text-[10px]">đ</span>
+                        </p>
                       </div>
-                      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                        <div className="flex items-center gap-3 text-red-600 mb-2">
-                          <Wallet size={18} />
-                          <span className="text-[10px] font-black uppercase tracking-widest">Nợ hiện tại</span>
-                        </div>
-                        <p className="text-2xl font-black text-red-600 tracking-tighter">{formatNumber(stats.debt)} <span className="text-sm text-slate-400">đ</span></p>
+
+                      <div className="bg-[#fff5f5] p-2.5 rounded-lg flex flex-col justify-between h-[72px]">
+                        <span className="text-[10px] font-bold text-red-500">Công nợ</span>
+                        <p className="text-lg font-bold text-red-600 leading-none">
+                          {formatNumber(stats.debt)} <span className="text-[10px]">đ</span>
+                        </p>
                       </div>
-                      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                        <div className="flex items-center gap-3 text-orange-600 mb-2">
-                          <Calendar size={18} />
-                          <span className="text-[10px] font-black uppercase tracking-widest">Số ngày nợ</span>
-                        </div>
-                        <p className="text-2xl font-black text-orange-600 tracking-tighter">{stats.debtDays} <span className="text-sm text-slate-400">ngày</span></p>
+
+                      <div className="bg-[#fffaf0] p-2.5 rounded-lg flex flex-col justify-between h-[72px]">
+                        <span className="text-[10px] font-bold text-orange-600">Đơn gần nhất</span>
+                        <p className="text-lg font-bold text-orange-700 leading-none">
+                          {stats.lastTransaction ? (stats.lastTransaction.split(' ').find(p => p.includes('/')) || stats.lastTransaction.split(' ')[0]) : '---'}
+                        </p>
+                      </div>
+
+                      <div className="bg-[#f0fbfa] p-2.5 rounded-lg flex flex-col justify-between h-[72px] sm:col-span-1 col-span-2 sm:flex hidden">
+                        <span className="text-[10px] font-bold text-teal-600">Tỷ lệ TT</span>
+                        <p className="text-lg font-bold text-teal-700 leading-none">
+                          {Math.round(stats.paymentRate)}%
+                        </p>
+                      </div>
+
+                      {/* Mobile Payment Rate */}
+                      <div className="bg-[#f0fbfa] p-2.5 rounded-lg flex flex-col justify-between h-[72px] sm:hidden flex">
+                        <span className="text-[10px] font-bold text-teal-600">Tỷ lệ TT</span>
+                        <p className="text-lg font-bold text-teal-700 leading-none">
+                          {Math.round(stats.paymentRate)}%
+                        </p>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 mb-4 md:mb-8 bg-white p-4 md:p-6 rounded-xl border border-slate-200 shadow-sm">
                       <div>
-                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Thông tin cơ bản</h4>
-                        <div className="space-y-3">
+                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 md:mb-4">Thông tin cơ bản</h4>
+                        <div className="space-y-2 md:space-y-3">
                           <div className="flex justify-between">
                             <span className="text-xs text-slate-500 font-bold">Địa chỉ:</span>
                             <span className="text-xs text-slate-800 font-black">{selectedCustomer.address || '---'}</span>
@@ -473,9 +514,9 @@ export const Customers: React.FC = () => {
                           </div>
                         </div>
                       </div>
-                      <div>
-                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Thông tin hệ thống</h4>
-                        <div className="space-y-3">
+                      <div className="pt-4 md:pt-0 border-t border-slate-100 md:border-t-0">
+                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 md:mb-4">Thông tin hệ thống</h4>
+                        <div className="space-y-2 md:space-y-3">
                           <div className="flex justify-between">
                             <span className="text-xs text-slate-500 font-bold">Người tạo:</span>
                             <span className="text-xs text-slate-800 font-black">{selectedCustomer.createdBy || '---'}</span>
@@ -500,34 +541,52 @@ export const Customers: React.FC = () => {
                         stats.invoices.map(invoice => (
                           <div 
                             key={invoice.id} 
-                            className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-pink-300 transition-all cursor-pointer group/inv"
+                            className="bg-white p-3 md:p-4 rounded-xl border border-slate-200 shadow-sm hover:border-pink-300 transition-all cursor-pointer group/inv"
                             onClick={() => setSelectedInvoice(invoice)}
                           >
-                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                              <div className="flex items-center gap-4">
-                                <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 group-hover/inv:bg-pink-50 group-hover/inv:text-pink-500 transition-all">
-                                  <FileText size={20} />
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 md:gap-4">
+                              <div className="flex items-center gap-3 md:gap-4">
+                                <div className="w-8 h-8 md:w-10 md:h-10 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 group-hover/inv:bg-pink-50 group-hover/inv:text-pink-500 transition-all shrink-0">
+                                  <FileText size={18} className="md:w-5 md:h-5" />
                                 </div>
-                                <div>
-                                  <p className="font-black text-sm text-slate-800 uppercase tracking-tighter">{invoice.id}</p>
-                                  <div className="flex items-center gap-2 text-[10px] text-slate-400 font-bold mt-1">
-                                    <Calendar size={12} />
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-bold text-xs md:text-sm text-slate-800 tracking-tight truncate">{invoice.id}</p>
+                                  <div className="flex items-center gap-2 text-[10px] text-slate-400 font-semibold mt-0.5 whitespace-nowrap">
+                                    <Calendar size={10} className="md:w-3 md:h-3" />
                                     {invoice.date}
                                   </div>
                                 </div>
+                                <div className="md:hidden flex items-center gap-2">
+                                  {invoice.debt > 0 && (
+                                    <button 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleOpenPaymentModal('SINGLE', invoice.id, invoice.debt);
+                                      }}
+                                      className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-600 hover:text-white transition-all shrink-0"
+                                      title="Thu nợ đơn này"
+                                    >
+                                      <CreditCard size={14} />
+                                    </button>
+                                  )}
+                                  <div className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600 shrink-0">
+                                    ĐÃ XUẤT
+                                  </div>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-6">
-                                <div className="text-right">
-                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Tổng tiền</p>
-                                  <p className="font-black text-slate-800 text-sm">{formatNumber(invoice.total)}đ</p>
+                              
+                              <div className="flex items-center justify-between md:justify-end gap-3 md:gap-6 border-t md:border-t-0 border-slate-50 pt-2 md:pt-0">
+                                <div className="text-left md:text-right">
+                                  <p className="text-[9px] md:text-[10px] font-medium text-slate-400 tracking-tight md:mb-0.5">Tổng tiền</p>
+                                  <p className="font-bold text-slate-800 text-xs md:text-sm">{formatNumber(invoice.total)}đ</p>
                                 </div>
                                 <div className="text-right">
-                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Còn nợ</p>
-                                  <p className={`font-black text-sm ${invoice.debt > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                                  <p className="text-[9px] md:text-[10px] font-medium text-slate-400 tracking-tight md:mb-0.5">Còn nợ</p>
+                                  <p className={`font-bold text-xs md:text-sm ${invoice.debt > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                                     {formatNumber(invoice.debt)}đ
                                   </p>
                                 </div>
-                                <div className="flex items-center gap-2">
+                                <div className="hidden md:flex items-center gap-2">
                                   {invoice.debt > 0 && (
                                     <button 
                                       onClick={(e) => {
@@ -540,8 +599,8 @@ export const Customers: React.FC = () => {
                                       <CreditCard size={14} />
                                     </button>
                                   )}
-                                  <div className="px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600">
-                                    ĐÃ XUẤT
+                                  <div className="px-3 py-1 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-600">
+                                    Đã xuất
                                   </div>
                                 </div>
                               </div>
@@ -554,15 +613,25 @@ export const Customers: React.FC = () => {
                 );
               })()}
             </div>
+            
+            {/* Footer Actions */}
+            <div className="p-4 md:p-6 border-t border-slate-100 bg-slate-50/50 shrink-0 uppercase">
+              <button 
+                onClick={() => setSelectedCustomer(null)}
+                className="w-full py-3 bg-[#991b1b] text-white font-black rounded-lg uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors"
+              >
+                Đóng
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Invoice Detail Modal */}
       {selectedInvoice && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm print:hidden">
-          <div className="bg-white w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center md:p-4 p-0 bg-slate-900/60 backdrop-blur-sm print:hidden">
+          <div className="bg-white w-full max-w-2xl md:rounded-xl rounded-none shadow-2xl overflow-hidden flex flex-col h-full md:max-h-[85vh] animate-in slide-in-from-bottom-4 duration-300">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
               <div className="flex items-center gap-3">
                 <FileText className="text-pink-600" size={20} />
                 <h3 className="text-lg font-black text-slate-800 uppercase tracking-tighter">Chi tiết hóa đơn {selectedInvoice.id}</h3>
@@ -591,47 +660,47 @@ export const Customers: React.FC = () => {
               </div>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-6">
-              <div className="grid grid-cols-2 gap-8 mb-8">
+            <div className="flex-1 overflow-y-auto p-4 md:p-6">
+              <div className="grid grid-cols-2 gap-4 md:gap-8 mb-4 md:mb-8">
                 <div>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Khách hàng</p>
-                  <p className="font-bold text-slate-800 text-sm">{selectedInvoice.customer}</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 italic">Khách hàng</p>
+                  <p className="font-bold text-slate-800 text-xs md:text-sm">{selectedInvoice.customer}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Ngày bán</p>
-                  <p className="font-black text-slate-800 text-sm">{selectedInvoice.date}</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 italic">Ngày bán</p>
+                  <p className="font-black text-slate-800 text-xs md:text-sm">{selectedInvoice.date}</p>
                 </div>
               </div>
 
-              <div className="border border-slate-200 rounded-xl overflow-hidden mb-6">
+              <div className="mb-4 md:mb-6 overflow-hidden">
                 <table className="w-full text-left border-collapse">
                   <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="p-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Sản phẩm</th>
-                      <th className="p-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">SL</th>
-                      <th className="p-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Đơn giá</th>
-                      <th className="p-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Thành tiền</th>
+                    <tr className="border-y border-slate-200">
+                      <th className="p-2 md:p-3 text-[10px] md:text-sm font-bold text-slate-700 w-12 text-center">STT</th>
+                      <th className="p-2 md:p-3 text-[10px] md:text-sm font-bold text-slate-700">Tên Sản Phẩm</th>
+                      <th className="p-2 md:p-3 text-[10px] md:text-sm font-bold text-slate-700 text-center">Số Lượng</th>
+                      <th className="p-2 md:p-3 text-[10px] md:text-sm font-bold text-slate-700 text-right">Đơn Giá</th>
+                      <th className="p-2 md:p-3 text-[10px] md:text-sm font-bold text-slate-700 text-right">Thành Tiền</th>
                     </tr>
                   </thead>
                   <tbody>
                     {selectedInvoice.items.map((item, idx) => (
                       <React.Fragment key={idx}>
-                        <tr className="border-b border-slate-100">
-                          <td className="p-4">
-                            <p className="font-bold text-xs text-slate-800 tracking-tighter">{item.name}</p>
-                            <p className="text-[9px] text-slate-400 font-bold mt-0.5 uppercase tracking-widest">{item.id}</p>
+                        <tr className="border-b border-slate-50">
+                          <td className="p-2 md:p-3 text-center text-[10px] md:text-sm text-slate-600 font-medium">{idx + 1}</td>
+                          <td className="p-2 md:p-3">
+                            <p className="font-medium text-[10px] md:text-sm text-slate-800">{item.name}</p>
                           </td>
-                          <td className="p-4 text-center font-black text-xs text-slate-600">{item.qty}</td>
-                          <td className="p-4 text-right font-black text-xs text-slate-600">{formatNumber(item.price)}đ</td>
-                          <td className="p-4 text-right font-black text-xs text-slate-800">{formatNumber(item.qty * item.price)}đ</td>
+                          <td className="p-2 md:p-3 text-center text-[10px] md:text-sm text-slate-600 font-medium">{item.qty}</td>
+                          <td className="p-2 md:p-3 text-right text-[10px] md:text-sm text-slate-600 font-medium">{formatNumber(item.price)} <span className="underline">đ</span></td>
+                          <td className="p-2 md:p-3 text-right text-[10px] md:text-sm text-slate-800 font-bold">{formatNumber(item.qty * item.price)} <span className="underline">đ</span></td>
                         </tr>
                         {item.sn && (
-                          <tr className="bg-slate-50/50">
-                            <td colSpan={4} className="p-3 px-4">
-                              <div className="flex items-center gap-1.5">
-                                <Hash size={10} className="text-slate-400" />
-                                <span className="text-[9px] font-mono font-bold text-slate-500">
-                                  {Array.isArray(item.sn) ? item.sn.join(', ') : item.sn}
+                          <tr className="bg-slate-50/30">
+                            <td colSpan={5} className="p-1 px-12">
+                              <div className="flex items-center gap-1.5 opacity-60">
+                                <span className="text-[9px] font-mono text-slate-500">
+                                  SN: {Array.isArray(item.sn) ? item.sn.join(', ') : item.sn}
                                 </span>
                               </div>
                             </td>
@@ -640,37 +709,55 @@ export const Customers: React.FC = () => {
                       </React.Fragment>
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr className="border-t border-slate-200">
+                      <td colSpan={3}></td>
+                      <td className="p-2 md:p-3 text-right text-[10px] md:text-sm font-bold text-slate-700">Tổng:</td>
+                      <td className="p-2 md:p-3 text-right text-[10px] md:text-sm font-bold text-slate-800">{formatNumber(selectedInvoice.total)} <span className="underline">đ</span></td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
 
-              <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-100">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Tổng tiền hàng</span>
-                  <span className="font-black text-slate-800">{formatNumber(selectedInvoice.total)}đ</span>
+              <div className="space-y-1.5 md:space-y-2 py-4 border-t border-slate-200">
+                <div className="flex justify-between items-center px-2">
+                  <span className="text-[11px] md:text-sm text-slate-600 font-medium">Tạm tính (chưa VAT):</span>
+                  <span className="font-medium text-[11px] md:text-sm text-slate-800">{formatNumber(selectedInvoice.total)} <span className="underline">đ</span></span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Đã thanh toán</span>
-                  <span className="font-black text-emerald-600">{formatNumber(selectedInvoice.paid)}đ</span>
+                <div className="flex justify-between items-center px-2">
+                  <span className="text-[11px] md:text-sm text-slate-600 font-medium">Tổng tiền hàng:</span>
+                  <span className="font-medium text-[11px] md:text-sm text-slate-800">{formatNumber(selectedInvoice.total)} <span className="underline">đ</span></span>
                 </div>
-                <div className="flex justify-between items-center pt-2 border-t border-slate-200">
-                  <span className="text-sm font-black text-red-800 uppercase tracking-widest">Còn nợ</span>
-                  <span className="text-lg font-black text-red-600">{formatNumber(selectedInvoice.debt)}đ</span>
+                
+                <div className="flex justify-between items-center pt-3 mt-2 px-2 border-t border-slate-100 italic font-bold">
+                  <span className="text-sm md:text-2xl font-black text-slate-800 uppercase tracking-tight">TỔNG TIỀN:</span>
+                  <span className="text-sm md:text-2xl font-black text-blue-600 tracking-tighter">{formatNumber(selectedInvoice.total)} <span className="underline">đ</span></span>
+                </div>
+
+                <div className="flex justify-between items-center px-2">
+                  <span className="text-[11px] md:text-sm text-slate-600 font-medium">Đã thanh toán:</span>
+                  <span className="font-bold text-[11px] md:text-sm text-emerald-600">{formatNumber(selectedInvoice.paid)} <span className="underline">đ</span></span>
+                </div>
+
+                <div className="flex justify-between items-center px-2">
+                  <span className="text-[11px] md:text-sm text-slate-600 font-medium">Còn nợ:</span>
+                  <span className="font-bold text-[11px] md:text-sm text-red-600">{formatNumber(selectedInvoice.debt)} <span className="underline">đ</span></span>
                 </div>
               </div>
             </div>
 
-            <div className="p-6 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
+            <div className="p-4 md:p-6 border-t border-slate-100 flex justify-end gap-2 md:gap-3 bg-slate-50 shrink-0">
               {selectedInvoice.debt > 0 && (
                 <button 
                   onClick={() => handleOpenPaymentModal('SINGLE', selectedInvoice.id, selectedInvoice.debt)}
-                  className="px-6 py-3 bg-emerald-600 text-white rounded-lg font-black uppercase text-xs tracking-widest shadow-md shadow-emerald-100 flex items-center gap-2 hover:bg-emerald-700 transition-all active:scale-95"
+                  className="flex-1 md:flex-none px-4 md:px-6 py-2.5 md:py-3 bg-emerald-600 text-white rounded-lg font-black uppercase text-[10px] md:text-xs tracking-widest shadow-md shadow-emerald-100 flex items-center justify-center gap-2 hover:bg-emerald-700 transition-all active:scale-95"
                 >
-                  <CreditCard size={16} /> Thu nợ ngay
+                  <CreditCard size={14} className="md:w-4 md:h-4" /> Thu nợ
                 </button>
               )}
               <button 
                 onClick={() => setSelectedInvoice(null)}
-                className="px-6 py-3 bg-white border border-slate-200 text-slate-600 rounded-lg font-black uppercase text-xs tracking-widest hover:bg-slate-50 transition-all"
+                className="flex-1 md:flex-none px-4 md:px-6 py-2.5 md:py-3 bg-[#991b1b] text-white rounded-lg font-black uppercase text-[10px] md:text-xs tracking-widest hover:bg-[#7f1d1d] transition-all text-center"
               >
                 Đóng
               </button>
@@ -691,12 +778,12 @@ export const Customers: React.FC = () => {
             </div>
             <div className="space-y-5">
               <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Số tiền thu</label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Số tiền thu</label>
                 <input 
-                  type="number" 
+                  type="text" 
                   value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(e.target.value)}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-lg font-black outline-none focus:border-emerald-400 text-emerald-600 shadow-inner" 
+                  onChange={(e) => setPaymentAmount(formatNumber(parseFormattedNumber(e.target.value)))}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-lg font-bold outline-none focus:border-emerald-400 text-emerald-600 shadow-inner" 
                   placeholder="0" 
                 />
               </div>
@@ -732,17 +819,17 @@ export const Customers: React.FC = () => {
 
       {/* Add/Edit Customer Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm print:hidden">
-          <div className="bg-white w-full max-w-md rounded-xl shadow-2xl overflow-hidden p-8">
-            <div className="flex justify-between items-center mb-6">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-0 md:p-4 bg-slate-900/50 backdrop-blur-sm print:hidden">
+          <div className="bg-white w-full max-w-md md:rounded-xl rounded-none shadow-2xl overflow-hidden p-6 md:p-8 flex flex-col h-full md:max-h-[95vh] animate-in slide-in-from-bottom-4 duration-300">
+            <div className="flex justify-between items-center mb-6 shrink-0">
               <h3 className="text-lg font-black text-slate-800 tracking-tighter uppercase">
                 {editingCustomerId ? 'Cập nhật Khách Hàng' : 'Thêm Khách Hàng'}
               </h3>
-              <button onClick={() => { setIsModalOpen(false); resetForm(); }} className="w-8 h-8 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-200 transition-colors flex items-center justify-center">
-                <X size={18} />
+              <button onClick={() => { setIsModalOpen(false); resetForm(); }} className="w-10 h-10 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-200 transition-colors flex items-center justify-center">
+                <X size={20} />
               </button>
             </div>
-            <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+            <div className="space-y-4 overflow-y-auto flex-1 pr-2">
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Tên khách hàng</label>
                 <input 
@@ -793,17 +880,30 @@ export const Customers: React.FC = () => {
                 />
               </div>
             </div>
-            <div className="mt-6">
+            <div className="mt-6 flex gap-3 shrink-0">
               <button 
                 onClick={handleSave}
-                className="w-full bg-pink-600 text-white py-3.5 rounded-lg font-black shadow-md shadow-pink-200 uppercase text-[11px] tracking-widest active:scale-95 transition-all hover:bg-pink-700"
+                className="flex-1 bg-emerald-600 text-white py-3.5 rounded-lg font-black shadow-md shadow-emerald-200 uppercase text-[11px] tracking-widest active:scale-95 transition-all hover:bg-emerald-700"
               >
-                {editingCustomerId ? 'CẬP NHẬT THÔNG TIN' : 'LƯU THÔNG TIN'}
+                {editingCustomerId ? 'CẬP NHẬT' : 'LƯU'}
+              </button>
+              <button 
+                onClick={() => { setIsModalOpen(false); resetForm(); }}
+                className="flex-1 py-3.5 bg-[#991b1b] text-white font-black rounded-lg uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors active:scale-95 shadow-md shadow-red-100"
+              >
+                Đóng
               </button>
             </div>
           </div>
         </div>
       )}
+      {/* Mobile Floating Action Button */}
+      <button 
+        onClick={() => { resetForm(); setIsModalOpen(true); }}
+        className="md:hidden fixed bottom-24 right-4 w-14 h-14 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg shadow-blue-200 z-40 active:scale-95 transition-transform"
+      >
+        <Plus size={24} />
+      </button>
     </div>
   );
 };

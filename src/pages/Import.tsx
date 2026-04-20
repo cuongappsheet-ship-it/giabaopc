@@ -1,16 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Plus, Truck, CheckCircle, X, Trash2, Barcode, Printer, ArrowLeft, LayoutGrid, Eye, Info, ChevronDown, Edit2, ArrowRight, UserCircle, PieChart, FileText, Package } from 'lucide-react';
+import { Search, Plus, Truck, CheckCircle, X, Trash2, Barcode, Printer, ArrowLeft, LayoutGrid, Eye, Info, ChevronDown, Edit2, ArrowRight, UserCircle, PieChart, FileText, Package, Image as ImageIcon } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { Product, ImportItem, Supplier, CashTransaction, ImportOrder } from '../types';
 import { formatNumber, parseFormattedNumber } from '../lib/utils';
+import { NumericFormat } from 'react-number-format';
 import { generateId } from '../lib/idUtils';
 import { PrintTemplate } from '../components/PrintTemplate';
+import { ProductDetailModal } from '../components/ProductDetailModal';
+import { useScrollLock } from '../hooks/useScrollLock';
+import { useMobileBackModal } from '../hooks/useMobileBackModal';
 
 export const Import: React.FC = () => {
   const navigate = useNavigate();
   const { products, suppliers, importOrders, cashTransactions, addImportOrder, addSupplier, updateProduct, addSerial, addCashTransaction, importDraft, setImportDraft, serials } = useAppContext();
   const [searchTerm, setSearchTerm] = useState('');
+  const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
+  
+  useMobileBackModal(!!viewingProduct, () => setViewingProduct(null));
   
   const [cart, setCart] = useState<(ImportItem & { hasSerial?: boolean; serials?: string[]; unit?: string; discount?: number; note?: string })[]>(
     (Array.isArray(importDraft?.cart) ? importDraft.cart : []).map(item => ({
@@ -40,6 +47,9 @@ export const Import: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
+  // Lock scroll when modals are open
+  useScrollLock(!!viewingProduct || isSupplierModalOpen || isMobileProductSearchOpen || isMobileSupplierSearchOpen || isMobileCheckoutOpen || !!showSuccessModal || showConfirmModal);
+
   const [paidAmount, setPaidAmount] = useState<number>(importDraft?.paid as number || 0);
 
   useEffect(() => {
@@ -68,17 +78,21 @@ export const Import: React.FC = () => {
   const [supplierSuggestions, setSupplierSuggestions] = useState<Supplier[]>([]);
 
   useEffect(() => {
-    if (searchTerm.trim()) {
-      const filtered = (products || []).filter(p => 
-        !p.isService && (
-          (p.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
-          (p.id || '').toLowerCase().includes(searchTerm.toLowerCase())
-        )
-      );
-      setProductSuggestions(filtered);
-    } else {
-      setProductSuggestions([]);
-    }
+    const handler = setTimeout(() => {
+      if (searchTerm.trim()) {
+        const filtered = (products || []).filter(p => 
+          !p.isService && (
+            (p.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+            (p.id || '').toLowerCase().includes(searchTerm.toLowerCase())
+          )
+        );
+        setProductSuggestions(filtered.slice(0, 30));
+      } else {
+        setProductSuggestions([]);
+      }
+    }, 300);
+
+    return () => clearTimeout(handler);
   }, [searchTerm, products]);
 
   const handleSupplierSearch = (val: string) => {
@@ -319,7 +333,7 @@ export const Import: React.FC = () => {
 
   return (
     <>
-      <div className="h-full flex flex-col lg:flex-row bg-slate-50 print:bg-white relative overflow-hidden">
+      <div className="flex flex-col lg:flex-row bg-slate-50 print:bg-white relative">
       {/* Print Template Container */}
       {printData && <PrintTemplate {...printData} />}
 
@@ -410,11 +424,18 @@ export const Import: React.FC = () => {
                   <div 
                     key={p.id} 
                     onClick={() => addToCart(p)}
-                    className="p-4 border-b border-slate-50 hover:bg-blue-50 flex justify-between items-center cursor-pointer transition-colors"
+                    className="p-3 border-b border-slate-50 hover:bg-blue-50 flex gap-3 items-center cursor-pointer transition-colors"
                   >
-                    <div>
-                      <p className="text-sm font-semibold text-slate-800">{p.name}</p>
-                      <p className="text-xs text-slate-400 font-medium mt-1">Mã: {p.id} | Tồn: {p.stock}</p>
+                    <div className="w-10 h-10 rounded border border-slate-100 bg-slate-50 flex-shrink-0 flex items-center justify-center overflow-hidden">
+                      {p.image ? (
+                        <img src={p.image} alt={p.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      ) : (
+                        <ImageIcon size={18} className="text-slate-300" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-slate-800 truncate">{p.name}</p>
+                      <p className="text-xs text-slate-400 font-medium mt-0.5">Mã: {p.id} | Tồn: {p.stock}</p>
                     </div>
                     {p.hasSerial && <span className="text-[10px] bg-orange-100 text-orange-600 px-2 py-0.5 rounded font-bold">Serial</span>}
                   </div>
@@ -491,12 +512,26 @@ export const Import: React.FC = () => {
                         </button>
                       </td>
                       <td className="p-3 text-sm text-slate-600 font-medium">{index + 1}</td>
-                      <td className="p-3 text-sm text-blue-600 font-semibold cursor-pointer hover:underline">{item.id}</td>
+                      <td className="p-3 text-sm text-blue-600 font-semibold cursor-pointer hover:underline" onClick={() => {
+                        const p = products.find(prod => prod.id === item.id);
+                        if (p) setViewingProduct(p);
+                      }}>{item.id}</td>
                       <td className="p-3">
-                        <p className="text-sm font-semibold text-slate-800">{item.name}</p>
-                        <div className="flex items-center gap-1 mt-1">
-                          <span className="text-[10px] text-slate-400 italic">Ghi chú...</span>
-                          <Edit2 size={10} className="text-slate-300 cursor-pointer hover:text-slate-500" />
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded border border-slate-100 bg-slate-50 flex-shrink-0 flex items-center justify-center overflow-hidden">
+                            {products.find(p => p.id === item.id)?.image ? (
+                              <img src={products.find(p => p.id === item.id)?.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <ImageIcon size={14} className="text-slate-300" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-slate-800">{item.name}</p>
+                            <div className="flex items-center gap-1 mt-1">
+                              <span className="text-[10px] text-slate-400 italic">Ghi chú...</span>
+                              <Edit2 size={10} className="text-slate-300 cursor-pointer hover:text-slate-500" />
+                            </div>
+                          </div>
                         </div>
                       </td>
                       <td className="p-3 text-center text-sm text-blue-600 font-medium">{item.unit}</td>
@@ -510,18 +545,20 @@ export const Import: React.FC = () => {
                         />
                       </td>
                       <td className="p-3">
-                        <input 
-                          type="text" 
-                          value={formatNumber(item.price)}
-                          onChange={(e) => updatePrice(item.id, parseFormattedNumber(e.target.value))}
+                        <NumericFormat 
+                          value={item.price}
+                          onValueChange={(values) => updatePrice(item.id, values.floatValue || 0)}
+                          thousandSeparator="."
+                          decimalSeparator=","
                           className="w-full text-center border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-semibold outline-none focus:border-blue-500"
                         />
                       </td>
                       <td className="p-3">
-                        <input 
-                          type="text" 
-                          value={formatNumber(item.discount || 0)}
-                          onChange={(e) => updateItemDiscount(item.id, parseFormattedNumber(e.target.value))}
+                        <NumericFormat 
+                          value={item.discount}
+                          onValueChange={(values) => updateItemDiscount(item.id, values.floatValue || 0)}
+                          thousandSeparator="."
+                          decimalSeparator=","
                           className="w-full text-center border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-semibold outline-none focus:border-blue-500"
                         />
                       </td>
@@ -530,38 +567,40 @@ export const Import: React.FC = () => {
                       </td>
                     </tr>
                     {/* Serial Input Row */}
-                    <tr className="border-b border-slate-100 bg-slate-50/30">
-                      <td className="p-0"></td>
-                      <td className="p-0"></td>
-                      <td className="p-0"></td>
-                      <td colSpan={6} className="p-3">
-                        <div className="flex flex-col gap-2">
-                          <div className="relative max-w-md">
-                            <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                            <input 
-                              type="text" 
-                              placeholder="Nhập số Serial/Imei" 
-                              className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-1.5 text-xs outline-none focus:border-blue-400 font-medium"
-                              onKeyPress={(e) => {
-                                if (e.key === 'Enter') {
-                                  addSerialToItem(item.id, (e.target as HTMLInputElement).value);
-                                  (e.target as HTMLInputElement).value = '';
-                                }
-                              }}
-                            />
-                          </div>
-                          {item.serials && item.serials.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5">
-                              {(item.serials || []).map((sn, sIdx) => (
-                                <span key={`${sn}-${sIdx}`} className="bg-blue-50 text-blue-600 text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1.5 border border-blue-100">
-                                  {sn} <X size={10} className="cursor-pointer hover:text-red-500" onClick={() => removeSerialFromItem(item.id, sn)} />
-                                </span>
-                              ))}
+                    {item.hasSerial && (
+                      <tr className="border-b border-slate-100 bg-slate-50/30 font-bold">
+                        <td className="p-0"></td>
+                        <td className="p-0"></td>
+                        <td className="p-0"></td>
+                        <td colSpan={6} className="p-3">
+                          <div className="flex flex-col gap-2">
+                            <div className="relative max-w-sm">
+                              <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                              <input 
+                                type="text" 
+                                placeholder="Nhập số Serial/Imei" 
+                                className="w-full bg-white border border-indigo-200 rounded-lg pl-9 pr-3 py-1.5 text-xs outline-none focus:border-indigo-400 font-medium shadow-sm transition-all"
+                                onKeyPress={(e) => {
+                                  if (e.key === 'Enter') {
+                                    addSerialToItem(item.id, (e.target as HTMLInputElement).value);
+                                    (e.target as HTMLInputElement).value = '';
+                                  }
+                                }}
+                              />
                             </div>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
+                            {item.serials && item.serials.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5">
+                                {(item.serials || []).map((sn, sIdx) => (
+                                  <span key={`${sn}-${sIdx}`} className="bg-indigo-50 text-indigo-600 text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1.5 border border-indigo-100 animate-in zoom-in duration-200">
+                                    {sn} <X size={10} className="cursor-pointer hover:text-red-500" onClick={() => removeSerialFromItem(item.id, sn)} />
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                   </React.Fragment>
                 ))
               )}
@@ -586,8 +625,12 @@ export const Import: React.FC = () => {
                 const product = products.find(p => p.id === item.id);
                 return (
                   <div key={item.id} className="p-4 flex gap-3">
-                    <div className="w-16 h-16 bg-slate-100 rounded-lg shrink-0 flex items-center justify-center">
-                      <Package size={24} className="text-slate-400" />
+                    <div className="w-16 h-16 bg-slate-100 rounded-lg shrink-0 flex items-center justify-center overflow-hidden">
+                      {product?.image ? (
+                        <img src={product.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      ) : (
+                        <Package size={24} className="text-slate-400" />
+                      )}
                     </div>
                     <div className="flex-1">
                       <div className="flex justify-between items-start">
@@ -794,28 +837,31 @@ export const Import: React.FC = () => {
             </div>
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium text-slate-600">Giảm giá</span>
-              <input 
-                type="text" 
-                value={formatNumber(overallDiscount)}
-                onChange={(e) => setOverallDiscount(parseFormattedNumber(e.target.value))}
+              <NumericFormat 
+                value={overallDiscount}
+                onValueChange={(values) => setOverallDiscount(values.floatValue || 0)}
+                thousandSeparator="."
+                decimalSeparator=","
                 className="w-32 text-right border border-slate-200 rounded-lg bg-white px-3 py-1.5 text-sm font-semibold outline-none focus:border-blue-500" 
               />
             </div>
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium text-slate-600">Chi phí nhập trả NCC</span>
-              <input 
-                type="text" 
-                value={formatNumber(returnCost)}
-                onChange={(e) => setReturnCost(parseFormattedNumber(e.target.value))}
+              <NumericFormat 
+                value={returnCost}
+                onValueChange={(values) => setReturnCost(values.floatValue || 0)}
+                thousandSeparator="."
+                decimalSeparator=","
                 className="w-32 text-right border border-slate-200 rounded-lg bg-white px-3 py-1.5 text-sm font-semibold outline-none focus:border-blue-500 text-blue-600" 
               />
             </div>
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium text-slate-600">Phí vận chuyển</span>
-              <input 
-                type="text" 
-                value={formatNumber(shippingFee)}
-                onChange={(e) => setShippingFee(parseFormattedNumber(e.target.value))}
+              <NumericFormat 
+                value={shippingFee}
+                onValueChange={(values) => setShippingFee(values.floatValue || 0)}
+                thousandSeparator="."
+                decimalSeparator=","
                 className="w-32 text-right border border-slate-200 rounded-lg bg-white px-3 py-1.5 text-sm font-semibold outline-none focus:border-blue-500 text-orange-600" 
               />
             </div>
@@ -825,10 +871,11 @@ export const Import: React.FC = () => {
             </div>
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium text-slate-600">Đã thanh toán</span>
-              <input 
-                type="text" 
-                value={formatNumber(paidAmount)}
-                onChange={(e) => setPaidAmount(parseFormattedNumber(e.target.value))}
+              <NumericFormat 
+                value={paidAmount}
+                onValueChange={(values) => setPaidAmount(values.floatValue || 0)}
+                thousandSeparator="."
+                decimalSeparator=","
                 className="w-32 text-right border border-slate-200 rounded-lg bg-white px-3 py-1.5 text-sm font-semibold outline-none focus:border-blue-500" 
               />
             </div>
@@ -1008,10 +1055,11 @@ export const Import: React.FC = () => {
               
               <div className="flex justify-between items-center border-b border-slate-100 pb-2">
                 <span className="text-sm font-bold text-slate-800">Giảm giá</span>
-                <input 
-                  type="text" 
-                  value={formatNumber(overallDiscount)} 
-                  onChange={(e) => setOverallDiscount(parseFormattedNumber(e.target.value))}
+                <NumericFormat 
+                  value={overallDiscount}
+                  onValueChange={(values) => setOverallDiscount(values.floatValue || 0)}
+                  thousandSeparator="."
+                  decimalSeparator=","
                   className="w-24 text-right bg-transparent text-sm font-bold outline-none text-slate-800" 
                   placeholder="0"
                 />
@@ -1024,10 +1072,11 @@ export const Import: React.FC = () => {
 
               <div className="flex justify-between items-center border-b border-slate-100 pb-2">
                 <span className="text-sm font-bold text-slate-800">Tiền trả NCC</span>
-                <input 
-                  type="text" 
-                  value={formatNumber(paidAmount)}
-                  onChange={(e) => setPaidAmount(parseFormattedNumber(e.target.value))}
+                <NumericFormat 
+                  value={paidAmount}
+                  onValueChange={(values) => setPaidAmount(values.floatValue || 0)}
+                  thousandSeparator="."
+                  decimalSeparator=","
                   className="w-32 text-right bg-transparent text-lg font-bold text-slate-800 outline-none" 
                   placeholder="0"
                 />
@@ -1047,6 +1096,22 @@ export const Import: React.FC = () => {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Product Detail Modal */}
+      {viewingProduct && (
+        <ProductDetailModal 
+          product={viewingProduct} 
+          onClose={() => setViewingProduct(null)} 
+          onRefClick={(refId) => {
+            setViewingProduct(null);
+            if (refId.startsWith('NH')) {
+              navigate('/import-history');
+            } else if (refId.startsWith('HD')) {
+              navigate('/invoices');
+            }
+          }}
+        />
       )}
 
       {/* Add Supplier Modal */}
@@ -1084,15 +1149,15 @@ export const Import: React.FC = () => {
                       setIsSupplierModalOpen(false);
                     }
                   }}
-                  className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-bold shadow-md shadow-blue-200 text-sm active:scale-95 transition-all hover:bg-blue-700"
+                  className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold shadow-md shadow-emerald-200 text-sm active:scale-95 transition-all hover:bg-emerald-700"
                 >
-                  Lưu thông tin
+                  Lưu
                 </button>
                 <button 
                   onClick={() => setIsSupplierModalOpen(false)}
-                  className="w-full bg-slate-100 text-slate-600 py-3.5 rounded-xl font-bold text-sm hover:bg-slate-200 transition-all"
+                  className="w-full bg-[#991b1b] text-white py-3.5 rounded-xl font-bold text-sm hover:bg-[#7f1d1d] transition-all shadow-md shadow-red-100"
                 >
-                  Hủy
+                  Đóng
                 </button>
               </div>
             </div>

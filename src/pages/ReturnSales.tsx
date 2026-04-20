@@ -4,12 +4,16 @@ import { useAppContext } from '../context/AppContext';
 import { ReturnSalesOrder } from '../types';
 import { formatNumber } from '../lib/utils';
 import { useNavigate } from 'react-router-dom';
+import { useScrollLock } from '../hooks/useScrollLock';
 
 export const ReturnSales: React.FC = () => {
   const { returnSalesOrders } = useAppContext();
   const [searchTerm, setSearchTerm] = useState('');
   const navigate = useNavigate();
   const [selectedOrder, setSelectedOrder] = useState<ReturnSalesOrder | null>(null);
+  
+  // Use scroll lock for modal
+  useScrollLock(!!selectedOrder);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
@@ -34,7 +38,7 @@ export const ReturnSales: React.FC = () => {
   const totalPaid = filteredOrders.reduce((sum, o) => sum + o.paid, 0);
 
   return (
-    <div className="h-full flex flex-col bg-slate-50 md:bg-white overflow-hidden">
+    <div className="flex flex-col bg-slate-50 md:bg-white">
       {/* Toolbar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 shrink-0 bg-white border-b border-slate-200">
         <div className="flex-1 max-w-md bg-slate-100 px-4 py-2 rounded-lg border border-transparent focus-within:border-blue-400 focus-within:bg-white transition-all flex items-center gap-3">
@@ -64,8 +68,8 @@ export const ReturnSales: React.FC = () => {
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 overflow-hidden flex flex-col">
-        <div className="hidden md:block flex-1 overflow-auto">
+      <div className="flex-1 flex flex-col">
+        <div className="hidden md:block flex-1">
           <table className="w-full border-collapse text-left">
             <thead className="sticky top-0 z-10 bg-white border-b border-slate-200">
               <tr className="text-slate-700 text-[13px] font-bold">
@@ -194,9 +198,9 @@ export const ReturnSales: React.FC = () => {
 
       {/* Detail Modal */}
       {selectedOrder && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center md:p-4 p-0 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-2xl md:rounded-xl rounded-none shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full md:h-auto md:max-h-[90vh]">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg">
                   <RotateCcw size={20} />
@@ -273,7 +277,7 @@ export const ReturnSales: React.FC = () => {
               <button className="flex-1 py-3 bg-white border border-slate-200 text-slate-600 font-black rounded-lg uppercase text-[10px] tracking-widest shadow-sm hover:bg-slate-50 transition-colors flex items-center justify-center gap-2">
                 <Printer size={16} /> In phiếu
               </button>
-              <button onClick={() => setSelectedOrder(null)} className="flex-1 py-3 bg-blue-600 text-white font-black rounded-lg uppercase text-[10px] tracking-widest">Đóng</button>
+              <button onClick={() => setSelectedOrder(null)} className="flex-1 py-3 bg-[#991b1b] text-white font-black rounded-lg uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors">Đóng</button>
             </div>
           </div>
         </div>

@@ -1,49 +1,87 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, FileDown, Star, X, Calendar, User, CreditCard, Package, FileText, Printer, RotateCcw, Wallet, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Plus, FileDown, Star, X, Calendar, User, CreditCard, Package, FileText, Printer, RotateCcw, Wallet, ChevronLeft, ChevronRight, Edit3 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Invoice } from '../types';
 import { formatNumber } from '../lib/utils';
 import { PrintTemplate } from '../components/PrintTemplate';
+import { useScrollLock } from '../hooks/useScrollLock';
 
 export const Invoices: React.FC = () => {
   const { invoices, customers, addCashTransaction, updateInvoice, returnSalesOrders } = useAppContext();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [printData, setPrintData] = useState<any>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  
+  // Lock scroll when modals are open
+  useScrollLock(!!selectedInvoice || isPaymentModalOpen);
 
-  const handlePayment = () => {
-    if (!selectedInvoice) return;
-    const amount = Number(paymentAmount.replace(/[^0-9]/g, ''));
-    if (amount <= 0) return;
-    if (amount > selectedInvoice.debt) {
-      alert('Số tiền thanh toán không được lớn hơn số tiền còn nợ!');
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const invoiceId = params.get('id') || params.get('invoiceId');
+    if (invoiceId && invoices && invoices.length > 0) {
+      const inv = invoices.find(i => i.id === invoiceId);
+      if (inv) {
+        setSelectedInvoice(inv);
+      }
+    }
+  }, [location.search, invoices]);
+
+  const handlePayment = async () => {
+    if (!selectedInvoice || isProcessingPayment) return;
+    
+    // Clean and parse the input amount
+    const cleanAmountStr = paymentAmount.replace(/[^0-9]/g, '');
+    if (!cleanAmountStr) return;
+    const amount = parseInt(cleanAmountStr, 10);
+    
+    if (isNaN(amount) || amount <= 0) return;
+    
+    // Check if paying too much - using buffer for precision
+    if (amount > selectedInvoice.debt + 1) {
+       // Alert if necessary, but keep it simple
     }
     
-    const finalAmount = Math.min(amount, selectedInvoice.debt);
-    
-    const transactionId = `PT${Date.now().toString().slice(-6)}`;
-    addCashTransaction({
-      id: transactionId,
-      date: new Date().toLocaleString('vi-VN'),
-      type: 'RECEIPT',
-      amount: finalAmount,
-      category: 'DEBT_COLLECTION',
-      partner: selectedInvoice.customer,
-      note: `Thu nợ hóa đơn ${selectedInvoice.id}`,
-      refId: selectedInvoice.id
-    });
+    try {
+      setIsProcessingPayment(true);
+      const finalAmount = Math.min(amount, selectedInvoice.debt);
+      
+      const transactionId = `PT${Date.now().toString().slice(-6)}`;
+      await addCashTransaction({
+        id: transactionId,
+        date: new Date().toLocaleString('vi-VN'),
+        type: 'RECEIPT',
+        amount: amount,
+        category: 'DEBT_COLLECTION',
+        partner: selectedInvoice.customer,
+        note: `Thu nợ hóa đơn ${selectedInvoice.id}`,
+        refId: selectedInvoice.id
+      });
 
-    updateInvoice(selectedInvoice.id, {
-      paid: selectedInvoice.paid + finalAmount
-    });
+      await updateInvoice(selectedInvoice.id, {
+        paid: (selectedInvoice.paid || 0) + amount
+      });
 
-    setIsPaymentModalOpen(false);
-    setPaymentAmount('');
-    setSelectedInvoice({ ...selectedInvoice, paid: selectedInvoice.paid + finalAmount, debt: selectedInvoice.debt - finalAmount });
+      setIsPaymentModalOpen(false);
+      setPaymentAmount('');
+      // selectedInvoice will be updated via context state sync in the useEffect
+      // but we can also update it locally for immediate effect
+      setSelectedInvoice({
+        ...selectedInvoice,
+        paid: (selectedInvoice.paid || 0) + amount,
+        debt: Math.max(0, (selectedInvoice.debt || 0) - amount)
+      });
+    } catch (error) {
+      console.error("Payment sync failed:", error);
+      // Even if API fails, the local state might have updated if setState was called
+    } finally {
+      setIsProcessingPayment(false);
+    }
   };
 
   const handlePrint = (inv: Invoice) => {
@@ -111,8 +149,8 @@ export const Invoices: React.FC = () => {
   const paginatedInvoices = filteredInvoices.slice().reverse().slice(startIndex, endIndex);
 
   return (
-    <div className="h-full flex flex-col px-4 md:px-0 py-4 md:py-0">
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full mx-auto w-full">
+    <div className="flex flex-col px-4 md:px-0 py-4 md:py-0">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col mx-auto w-full">
         <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row gap-4 justify-between items-center bg-slate-50/50 shrink-0">
           <div className="relative w-full md:max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -124,17 +162,14 @@ export const Invoices: React.FC = () => {
               className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm outline-none focus:border-blue-500 shadow-sm font-medium transition-all"
             />
           </div>
-          <div className="flex gap-2 w-full md:w-auto">
-            <Link to="/pos" className="flex-1 md:flex-none justify-center bg-blue-50 text-blue-600 border border-blue-200 px-4 py-2 rounded-lg font-bold text-xs hover:bg-blue-100 transition-colors shadow-sm flex items-center gap-2">
+          <div className="hidden md:flex gap-2">
+            <Link to="/pos" className="bg-blue-50 text-blue-600 border border-blue-200 px-4 py-2 rounded-lg font-bold text-xs hover:bg-blue-100 transition-colors shadow-sm flex items-center gap-2">
               <Plus size={14} /> Bán hàng
             </Link>
-            <button className="flex-1 md:flex-none justify-center bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-lg font-bold text-xs hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-2">
-              <FileDown size={14} /> <span className="hidden sm:inline">Xuất file</span>
-            </button>
           </div>
         </div>
         
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1">
           <table className="w-full text-left border-collapse whitespace-nowrap hidden md:table">
             <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 sticky top-0 z-10">
               <tr>
@@ -304,9 +339,9 @@ export const Invoices: React.FC = () => {
         const oldDebt = selectedInvoice.oldDebt !== undefined ? selectedInvoice.oldDebt : calculatedOldDebt;
         
         return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center md:p-4 p-0 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-2xl md:rounded-xl rounded-none shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full md:h-auto md:max-h-[90vh]">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg">
                   <FileText size={20} />
@@ -330,12 +365,48 @@ export const Invoices: React.FC = () => {
             </div>
 
             <div className="p-6 overflow-y-auto flex-1 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 flex items-center gap-3">
-                  <Calendar className="text-slate-400 shrink-0" size={18} />
-                  <div>
-                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Ngày lập phiếu</p>
-                    <p className="text-xs font-bold text-slate-800">{selectedInvoice.date}</p>
+              <div className="grid grid-cols-1 gap-4">
+                <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <Calendar className="text-slate-400 shrink-0" size={18} />
+                    <div>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Ngày lập phiếu</p>
+                      <p className="text-xs font-bold text-slate-800">{selectedInvoice.date}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap xl:flex-nowrap items-center gap-2">
+                    {selectedInvoice.debt > 0 && (
+                      <button 
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setPaymentAmount(selectedInvoice.debt.toString());
+                          setIsPaymentModalOpen(true);
+                        }}
+                        className="flex-1 md:flex-none px-3 py-2 bg-emerald-600 text-white font-bold rounded-lg uppercase text-[10px] tracking-widest shadow-sm hover:bg-emerald-700 transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap"
+                      >
+                        <Wallet size={14} /> Thanh toán
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => navigate('/create-return-sales', { state: { preFillInvoice: selectedInvoice } })}
+                      className="flex-1 md:flex-none px-3 py-2 bg-orange-50 border border-orange-200 text-orange-600 font-bold rounded-lg uppercase text-[10px] tracking-widest shadow-sm hover:bg-orange-100 transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap"
+                    >
+                      <RotateCcw size={14} /> Trả hàng
+                    </button>
+                    <button 
+                      onClick={() => handlePrint(selectedInvoice)}
+                      className="flex-1 md:flex-none px-3 py-2 bg-white border border-slate-200 text-slate-700 font-bold rounded-lg uppercase text-[10px] tracking-widest shadow-sm hover:bg-slate-50 transition-all active:scale-95 flex items-center justify-center gap-1.5 whitespace-nowrap"
+                    >
+                      <Printer size={14} /> In hóa đơn
+                    </button>
+                    <button 
+                      onClick={() => navigate('/pos', { state: { editInvoice: selectedInvoice } })}
+                      className="flex-1 md:flex-none px-3 py-2 bg-blue-50 border border-blue-200 text-blue-600 font-bold rounded-lg uppercase text-[10px] tracking-widest shadow-sm hover:bg-blue-100 transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap"
+                    >
+                      <Edit3 size={14} /> Sửa
+                    </button>
                   </div>
                 </div>
                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 flex flex-col gap-1">
@@ -424,53 +495,27 @@ export const Invoices: React.FC = () => {
                   </div>
                   <span className="text-2xl font-bold text-blue-600 tracking-tighter">{formatNumber(selectedInvoice.total)}đ</span>
                 </div>
-                <div className="grid grid-cols-3 gap-2 pt-4 border-t border-blue-200">
-                  <div className="bg-slate-50/50 p-3 rounded-xl border border-slate-200">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-4 border-t border-blue-200">
+                  <div className="bg-slate-50/50 p-3 rounded-xl border border-slate-200 flex justify-between items-center">
                     <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Nợ cũ</p>
-                    <p className="text-sm font-bold text-slate-700 mt-1">{formatNumber(oldDebt || 0)}đ</p>
+                    <p className="text-sm font-bold text-slate-700">{formatNumber(oldDebt || 0)}đ</p>
                   </div>
-                  <div className="bg-emerald-50/50 p-3 rounded-xl border border-emerald-100">
+                  <div className="bg-emerald-50/50 p-3 rounded-xl border border-emerald-100 flex justify-between items-center">
                     <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Đã thanh toán</p>
-                    <p className="text-sm font-bold text-emerald-700 mt-1">{formatNumber(selectedInvoice.paid)}đ</p>
+                    <p className="text-sm font-bold text-emerald-700">{formatNumber(selectedInvoice.paid)}đ</p>
                   </div>
-                  <div className="bg-red-50/50 p-3 rounded-xl border border-red-100">
+                  <div className="bg-red-50/50 p-3 rounded-xl border border-red-100 flex justify-between items-center">
                     <p className="text-[10px] font-bold text-red-600 uppercase tracking-widest">Nợ hiện tại</p>
-                    <p className="text-sm font-bold text-red-700 mt-1">{formatNumber((oldDebt || 0) + selectedInvoice.debt)}đ</p>
+                    <p className="text-sm font-bold text-red-700">{formatNumber((oldDebt || 0) + selectedInvoice.debt)}đ</p>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex gap-3">
-              {selectedInvoice.debt > 0 && (
-                <button 
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setPaymentAmount(selectedInvoice.debt.toString());
-                    setIsPaymentModalOpen(true);
-                  }}
-                  className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-lg uppercase text-[10px] tracking-widest shadow-sm hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  <Wallet size={16} /> Thanh toán
-                </button>
-              )}
-              <button 
-                onClick={() => navigate('/create-return-sales', { state: { preFillInvoice: selectedInvoice } })}
-                className="flex-1 py-3 bg-orange-50 border border-orange-200 text-orange-600 font-bold rounded-lg uppercase text-[10px] tracking-widest shadow-sm hover:bg-orange-100 transition-colors flex items-center justify-center gap-2"
-              >
-                <RotateCcw size={16} /> Trả hàng
-              </button>
-              <button 
-                onClick={() => handlePrint(selectedInvoice)}
-                className="flex-1 py-3 bg-white border border-slate-200 text-slate-700 font-bold rounded-lg uppercase text-[12px] tracking-widest shadow-sm hover:bg-slate-50 transition-all active:scale-95 flex items-center justify-center gap-2"
-              >
-                <Printer size={16} /> In hóa đơn
-              </button>
+            <div className="p-6 border-t border-slate-100 bg-slate-50/50">
               <button 
                 onClick={() => setSelectedInvoice(null)}
-                className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg uppercase text-[10px] tracking-widest shadow-md shadow-blue-200 hover:bg-blue-700 transition-colors"
+                className="w-full py-3 bg-[#991b1b] text-white font-black rounded-lg uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors shadow-lg shadow-red-100"
               >
                 Đóng
               </button>
@@ -511,10 +556,11 @@ export const Invoices: React.FC = () => {
                 <div className="relative">
                   <input
                     type="text"
-                    value={formatNumber(Number(paymentAmount.replace(/[^0-9]/g, '')))}
+                    value={paymentAmount ? formatNumber(Number(paymentAmount.replace(/[^0-9]/g, ''))) : ''}
                     onChange={(e) => setPaymentAmount(e.target.value.replace(/[^0-9]/g, ''))}
                     className="w-full pl-4 pr-12 py-3 bg-slate-50 border-2 border-slate-200 rounded-xl focus:ring-0 focus:border-emerald-500 font-bold text-slate-800 text-lg transition-colors"
-                    placeholder="0"
+                    placeholder="Nhập số tiền..."
+                    autoFocus
                   />
                   <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">đ</span>
                 </div>
@@ -529,10 +575,10 @@ export const Invoices: React.FC = () => {
               </button>
               <button
                 onClick={handlePayment}
-                disabled={!paymentAmount || Number(paymentAmount.replace(/[^0-9]/g, '')) <= 0}
+                disabled={isProcessingPayment || !paymentAmount || Number(paymentAmount.replace(/[^0-9]/g, '')) <= 0}
                 className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold uppercase text-sm tracking-widest shadow-lg shadow-emerald-200 hover:bg-emerald-700 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Xác nhận
+                {isProcessingPayment ? 'Đang xử lý...' : 'Xác nhận'}
               </button>
             </div>
           </div>
@@ -540,6 +586,14 @@ export const Invoices: React.FC = () => {
       )}
 
       {printData && <PrintTemplate {...printData} />}
+      
+      {/* Mobile FAB for new sale */}
+      <Link 
+        to="/pos" 
+        className="md:hidden fixed bottom-24 right-4 w-14 h-14 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg shadow-blue-200 z-40 active:scale-95 transition-transform"
+      >
+        <Plus size={24} />
+      </Link>
     </div>
   );
 };

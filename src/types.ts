@@ -12,6 +12,7 @@ export interface Product {
   category?: string;
   brand?: string;
   expectedOutOfStock?: string;
+  image?: string;
 }
 
 export interface Customer {

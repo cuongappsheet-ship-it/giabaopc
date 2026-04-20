@@ -1,4 +1,4 @@
-const API_URL = 'https://script.google.com/macros/s/AKfycbyF_Lx9HTS4ujYXPWMeOTovUz-7tVG8KhXrKdzwKqJeNj7OXEPIbWSHn27DN_RGaVJu/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbw9fB9wBGPiHkoO4qmVxyBl69VcDHyhObmYZnq8vew6wBoXn72AILTGw3KBWOuSvjGLnQ/exec';
 
 export const apiService = {
   // Đọc dữ liệu từ 1 sheet
@@ -11,7 +11,13 @@ export const apiService = {
       if (result.success === true || result.status === 'success') {
         return result.data || [];
       }
-      console.error(`Error reading ${sheetName}:`, result.message || result.error || 'Unknown error');
+      
+      // Nếu là lỗi không tìm thấy sheet, chỉ log cảnh báo thay vì lỗi nghiêm trọng
+      if (result.message && result.message.includes('Sheet not found')) {
+        console.warn(`[API] ${result.message}. App will use default values.`);
+      } else {
+        console.error(`Error reading ${sheetName}:`, result.message || result.error || 'Unknown error');
+      }
       return [];
     } catch (error) {
       console.error(`Fetch error on ${sheetName}:`, error);

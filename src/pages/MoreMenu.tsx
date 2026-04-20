@@ -69,7 +69,7 @@ export const MoreMenu: React.FC = () => {
   ];
 
   return (
-    <div className="min-h-full bg-slate-50 pb-20">
+    <div className="min-h-full bg-slate-50 pb-2">
       {/* User Profile Header */}
       <div className="bg-white p-4 mb-4 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-3">
@@ -124,6 +124,18 @@ export const MoreMenu: React.FC = () => {
           <LogOut size={20} />
           <span>Đăng xuất</span>
         </button>
+      </div>
+
+      {/* Software Info */}
+      <div className="px-2 mt-6 mb-2 flex flex-col items-center justify-center text-center">
+        <img 
+          src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEi6auaPmOx44Q9OW7UvYxDFynRdaFpGI3z4k1UdchG_WNFIxvxs1_CLIysGsUAlGwtYbyV_QfAvJZ5-56Rpw3B00n7uFcJmTorBIQTFDzibjMeu7CHf-D4rBW4VgOLCCfc5F7ve3mLwVjImG2tbYo3ge_180NTz1evh8WECho9-vbegny4ROtZKxieR/s1600/Logo-cuong-tin.png" 
+          alt="DigiKiot Logo" 
+          className="h-12 mb-3 object-contain opacity-80" 
+        />
+        <p className="text-xs text-slate-500">Phát triển bởi <strong className="text-slate-600">DigiKiot - Cuongtin.vn</strong></p>
+        <p className="text-xs text-slate-500 mt-1">Số kỹ thuật: <strong className="text-slate-600">0931.113.048</strong></p>
+        <p className="text-[10px] text-slate-400 mt-2 font-mono bg-slate-200/50 px-2 py-0.5 rounded-full">Phiên bản V1.19426</p>
       </div>
     </div>
   );

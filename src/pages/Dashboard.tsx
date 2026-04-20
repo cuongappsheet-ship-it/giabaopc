@@ -16,7 +16,8 @@ import {
   Wallet,
   ArrowUpRight,
   ChevronRight,
-  Check
+  Check,
+  Wrench
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { formatNumber } from '../lib/utils';
@@ -35,7 +36,7 @@ export const Dashboard: React.FC = () => {
   const { invoices, returnSalesOrders, cashTransactions } = useAppContext();
   const [showProfit, setShowProfit] = useState(false);
   const [showDateModal, setShowDateModal] = useState(false);
-  const [dateRange, setDateRange] = useState<'today' | 'yesterday' | 'last_7_days' | 'this_month' | 'last_month' | 'this_year'>('today');
+  const [dateRange, setDateRange] = useState<'today' | 'yesterday' | 'last_7_days' | 'this_month' | 'last_month' | 'this_year'>('this_month');
 
   const parseDate = (dateStr: any) => {
     if (!dateStr) return new Date(0);
@@ -89,13 +90,27 @@ export const Dashboard: React.FC = () => {
   };
 
   const getRangeLabel = () => {
+    const today = new Date();
+    const formatDate = (date: Date) => date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    
     switch (dateRange) {
-      case 'today': return 'Hôm nay';
-      case 'yesterday': return 'Hôm qua';
-      case 'last_7_days': return '7 ngày qua';
-      case 'this_month': return 'Tháng này';
-      case 'last_month': return 'Tháng trước';
-      case 'this_year': return 'Năm nay';
+      case 'today': 
+        return `Hôm nay, ${formatDate(today)}`;
+      case 'yesterday': 
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        return `Hôm qua, ${formatDate(yesterday)}`;
+      case 'last_7_days': 
+        const sevenDaysAgo = new Date(today);
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+        return `7 ngày qua (${formatDate(sevenDaysAgo)} - ${formatDate(today)})`;
+      case 'this_month': 
+        return `Tháng này, T${today.getMonth() + 1}/${today.getFullYear()}`;
+      case 'last_month': 
+        const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        return `Tháng trước, T${lastMonth.getMonth() + 1}/${lastMonth.getFullYear()}`;
+      case 'this_year': 
+        return `Năm nay, ${today.getFullYear()}`;
       default: return 'Chọn thời gian';
     }
   };
@@ -142,6 +157,32 @@ export const Dashboard: React.FC = () => {
       cashTransactions: filterByRange(cashTransactions)
     };
   }, [invoices, returnSalesOrders, cashTransactions, dateRange]);
+
+  const topProductsYearly = useMemo(() => {
+    const productSalesMap: Record<string, { name: string; qty: number; revenue: number }> = {};
+    const now = new Date();
+    
+    invoices.forEach(inv => {
+      if (!inv.date) return;
+      const invDate = parseDate(inv.date);
+      // Filter for this year only
+      if (invDate.getFullYear() !== now.getFullYear()) return;
+      
+      if (!inv.items) return;
+      inv.items.forEach((item: any) => {
+        if (!item.id || !item.name) return;
+        if (!productSalesMap[item.id]) {
+          productSalesMap[item.id] = { name: item.name, qty: 0, revenue: 0 };
+        }
+        productSalesMap[item.id].qty += item.qty || 0;
+        productSalesMap[item.id].revenue += (item.qty * item.price) || 0;
+      });
+    });
+
+    return Object.values(productSalesMap)
+      .sort((a, b) => b.qty - a.qty)
+      .slice(0, 5);
+  }, [invoices]);
 
   const stats = useMemo(() => {
     const totalRevenue = filteredData.invoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
@@ -227,139 +268,212 @@ export const Dashboard: React.FC = () => {
   };
 
   return (
-    <div className="h-full overflow-y-auto bg-slate-50 md:bg-transparent px-0 md:px-0 py-0 md:py-0">
+    <div className="bg-slate-50 md:bg-transparent px-0 md:px-0 py-0 md:py-0">
       {/* Desktop View */}
       <div className="hidden md:block p-6">
         <div className="grid md:grid-cols-3 gap-6 mb-8">
           <div className="md:col-span-2 bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-800 p-8 rounded-xl text-white shadow-lg relative overflow-hidden group border border-blue-500/20">
             <div className="relative z-10">
               <div className="flex justify-between items-start">
-                <div>
-                  <p className="text-blue-100 text-[11px] font-bold uppercase tracking-[0.2em] mb-2 opacity-90">Doanh thu hệ thống</p>
-                  <h2 className="text-4xl md:text-5xl font-bold mb-10 tracking-tighter drop-shadow-md">{formatNumber(stats.totalRevenue)}đ</h2>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <p className="text-blue-100 text-xs font-medium opacity-90">Kỳ xem</p>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={dateRange}
+                        onChange={(e) => setDateRange(e.target.value as any)}
+                        className="bg-white/20 text-white border-none rounded-md text-sm font-bold pl-2 pr-8 py-1 focus:ring-0 outline-none appearance-none cursor-pointer"
+                        style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='white'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%></path>%3C/svg%3E")`, backgroundPosition: 'right 0.5rem center', backgroundRepeat: 'no-repeat', backgroundSize: '1.2em 1.2em' }}
+                      >
+                        <option value="today" className="text-slate-800">Hôm nay</option>
+                        <option value="yesterday" className="text-slate-800">Hôm qua</option>
+                        <option value="last_7_days" className="text-slate-800">7 ngày qua</option>
+                        <option value="this_month" className="text-slate-800">Tháng này</option>
+                        <option value="last_month" className="text-slate-800">Tháng trước</option>
+                        <option value="this_year" className="text-slate-800">Năm nay</option>
+                      </select>
+                      <span className="text-blue-200 text-xs font-medium">({getRangeLabel().split(', ')[1] || getRangeLabel()})</span>
+                    </div>
+                  </div>
+                  <p className="text-blue-100 text-[11px] font-normal tracking-widest mb-2 opacity-90">Doanh thu hệ thống</p>
+                  <h2 className="text-4xl md:text-5xl font-medium mb-10 tracking-tight drop-shadow-md">{formatNumber(stats.totalRevenue)}đ</h2>
                 </div>
                 <div className="text-right">
-                  <p className="text-blue-100 text-[11px] font-bold uppercase tracking-[0.2em] mb-2 opacity-90">Lợi nhuận</p>
-                  <h2 className="text-3xl md:text-4xl font-bold mb-10 tracking-tighter drop-shadow-md text-emerald-300">{formatNumber(stats.totalProfit)}đ</h2>
+                  <p className="text-blue-100 text-[11px] font-normal tracking-widest mb-2 opacity-90">Lợi nhuận</p>
+                  <h2 className="text-3xl md:text-4xl font-medium mb-10 tracking-tight drop-shadow-md text-emerald-300">{formatNumber(stats.totalProfit)}đ</h2>
                 </div>
               </div>
               <div className="flex gap-4">
                 <div className="bg-white/10 backdrop-blur-md px-6 py-4 rounded-lg border border-white/20 shadow-xl flex-1">
-                  <p className="text-[10px] font-bold uppercase opacity-70 mb-1 tracking-widest">Đơn bán</p>
-                  <p className="font-bold text-2xl tracking-tighter">{stats.totalOrders}</p>
+                  <p className="text-[10px] font-normal opacity-70 mb-1 tracking-widest">Đơn bán</p>
+                  <p className="font-medium text-3xl tracking-tight">{stats.totalOrders}</p>
                 </div>
                 <div className="bg-white/10 backdrop-blur-md px-6 py-4 rounded-lg border border-white/20 shadow-xl flex-1">
-                  <p className="text-[10px] font-bold uppercase opacity-70 mb-1 tracking-widest text-emerald-200">Tiền vào (Sổ quỹ)</p>
-                  <p className="font-bold text-2xl tracking-tighter text-emerald-300">+{formatNumber(stats.totalCashIn)}đ</p>
+                  <p className="text-[10px] font-normal opacity-70 mb-1 tracking-widest text-emerald-200">Tiền vào</p>
+                  <p className="font-medium text-3xl tracking-tight text-emerald-300">+{formatNumber(stats.totalCashIn)}đ</p>
                 </div>
                 <div className="bg-white/10 backdrop-blur-md px-6 py-4 rounded-lg border border-white/20 shadow-xl flex-1">
-                  <p className="text-[10px] font-bold uppercase opacity-70 mb-1 tracking-widest text-rose-200">Tiền ra (Sổ quỹ)</p>
-                  <p className="font-bold text-2xl tracking-tighter text-rose-300">-{formatNumber(stats.totalCashOut)}đ</p>
+                  <p className="text-[10px] font-normal opacity-70 mb-1 tracking-widest text-rose-200">Tiền ra</p>
+                  <p className="font-medium text-3xl tracking-tight text-rose-300">-{formatNumber(stats.totalCashOut)}đ</p>
                 </div>
               </div>
             </div>
-            <TrendingUp className="absolute bottom-0 right-0 text-white/5 translate-y-1/4 translate-x-1/4 rotate-12 transition-transform duration-1000 group-hover:scale-110" size={280} />
           </div>
           
-          <div className="grid grid-rows-2 gap-4">
+          <div className="grid grid-rows-3 gap-4">
             <Link to="/pos" className="bg-white p-6 rounded-xl border border-slate-200 flex items-center gap-5 hover:border-blue-400 hover:shadow-md transition-all active:scale-95 group shadow-sm">
-              <div className="w-16 h-16 bg-orange-50 text-orange-600 rounded-lg flex items-center justify-center group-hover:rotate-3 transition-transform shadow-sm border border-orange-100">
-                <ShoppingCart size={32} />
+              <div className="w-12 h-12 bg-orange-50 text-orange-600 rounded-lg flex items-center justify-center group-hover:rotate-3 transition-transform shadow-sm border border-orange-100 shrink-0">
+                <ShoppingCart size={24} />
               </div>
-              <div className="text-left">
-                <p className="font-bold text-slate-800 text-sm tracking-tight">Bán hàng</p>
-                <p className="text-[11px] text-slate-400 font-medium">Tạo hóa đơn POS nhanh</p>
+              <div className="text-left w-full overflow-hidden">
+                <p className="font-bold text-slate-800 text-sm tracking-tight truncate">Bán hàng</p>
+                <p className="text-[11px] text-slate-400 font-medium truncate">Tạo hóa đơn POS nhanh</p>
               </div>
             </Link>
             <Link to="/import" className="bg-white p-6 rounded-xl border border-slate-200 flex items-center gap-5 hover:border-indigo-400 hover:shadow-md transition-all active:scale-95 group shadow-sm">
-              <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center group-hover:rotate-3 transition-transform shadow-sm border border-indigo-100">
-                <Truck size={32} />
+              <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center group-hover:rotate-3 transition-transform shadow-sm border border-indigo-100 shrink-0">
+                <Truck size={24} />
               </div>
-              <div className="text-left">
-                <p className="font-bold text-slate-800 text-sm tracking-tight">Nhập hàng</p>
-                <p className="text-[11px] text-slate-400 font-medium">Tạo phiếu nhập kho</p>
+              <div className="text-left w-full overflow-hidden">
+                <p className="font-bold text-slate-800 text-sm tracking-tight truncate">Nhập hàng</p>
+                <p className="text-[11px] text-slate-400 font-medium truncate">Tạo phiếu nhập kho</p>
               </div>
             </Link>
+            <Link to="/reports" className="bg-white p-6 rounded-xl border border-slate-200 flex items-center gap-5 hover:border-emerald-400 hover:shadow-md transition-all active:scale-95 group shadow-sm">
+              <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center group-hover:rotate-3 transition-transform shadow-sm border border-emerald-100 shrink-0">
+                <PieChart size={24} />
+              </div>
+              <div className="text-left w-full overflow-hidden">
+                <p className="font-bold text-slate-800 text-sm tracking-tight truncate">Báo cáo</p>
+                <p className="text-[11px] text-slate-400 font-medium truncate">Xem chi tiết thống kê bán hàng</p>
+              </div>
+            </Link>
+          </div>
+        </div>
+
+        {/* Desktop Top Products and Chart Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* Desktop Revenue Chart */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="font-bold text-lg text-slate-800 tracking-tight flex items-center gap-2">
+                <BarChart3 size={20} className="text-blue-500" /> Thống kê doanh thu
+              </h3>
+            </div>
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis 
+                    dataKey="name" 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }}
+                    dy={10}
+                  />
+                  <YAxis 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }}
+                    tickFormatter={(value) => value >= 1000000 ? `${(value / 1000000).toFixed(0)}Tr` : value}
+                  />
+                  <Tooltip 
+                    cursor={{ fill: '#f8fafc' }}
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                    formatter={(value: number) => [formatNumber(value) + 'đ', 'Doanh thu']}
+                  />
+                  <Bar dataKey="revenue" radius={[4, 4, 0, 0]} barSize={32}>
+                    {chartData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={index === chartData.length - 1 ? '#2563eb' : '#3b82f6'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          
+          {/* Desktop Top Products */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="font-bold text-lg text-slate-800 tracking-tight flex items-center gap-2">
+                <TrendingUp size={20} className="text-blue-500" /> Sản phẩm bán chạy nhất <span className="text-xs font-normal text-slate-400 ml-1">(trong năm nay)</span>
+              </h3>
+            </div>
+            {topProductsYearly.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {topProductsYearly.slice(0, 4).map((p, i) => (
+                  <div key={i} className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between">
+                    <div>
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-bold shrink-0">#{i + 1}</span>
+                        <p className="text-xs font-bold text-slate-600 text-right">{p.qty} sl</p>
+                      </div>
+                      <p className="font-bold text-sm text-slate-800 line-clamp-2 leading-snug">{p.name}</p>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-slate-200">
+                      <p className="text-xs text-slate-400 mb-0.5">Doanh thu:</p>
+                      <p className="font-bold text-blue-600 tracking-tight">{formatNumber(p.revenue)}đ</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6 text-slate-400 italic text-sm">Chưa có dữ liệu bán hàng.</div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Mobile View */}
-      <div className="md:hidden flex flex-col gap-4 p-4 pb-24">
-        {/* Date Selector */}
-        <div className="flex items-center justify-center relative">
-          <button 
-            onClick={() => setShowDateModal(true)}
-            className="flex items-center gap-2 bg-blue-50 text-blue-600 px-4 py-2 rounded-full text-sm font-bold border border-blue-100 shadow-sm active:scale-95 transition-all"
-          >
-            <Calendar size={16} />
-            <span>{getRangeLabel()}</span>
-            <ChevronDown size={16} />
-          </button>
-
-          {showDateModal && (
-            <div className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/40 backdrop-blur-sm" onClick={() => setShowDateModal(false)}>
-              <div className="bg-white w-full rounded-t-[2rem] p-6 animate-in slide-in-from-bottom duration-300" onClick={e => e.stopPropagation()}>
-                <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6" />
-                <h3 className="text-xl font-black text-slate-800 mb-6 text-left px-2">Thời gian</h3>
-                <div className="grid grid-cols-1 gap-1">
-                  {[
-                    { id: 'today', label: 'Hôm nay' },
-                    { id: 'yesterday', label: 'Hôm qua' },
-                    { id: 'last_7_days', label: '7 ngày qua' },
-                    { id: 'this_month', label: 'Tháng này' },
-                    { id: 'last_month', label: 'Tháng trước' },
-                    { id: 'this_year', label: 'Năm nay' }
-                  ].map(option => (
-                    <button
-                      key={option.id}
-                      onClick={() => {
-                        setDateRange(option.id as any);
-                        setShowDateModal(false);
-                      }}
-                      className={`w-full p-4 rounded-xl text-base font-bold transition-all flex items-center justify-between ${dateRange === option.id ? 'text-blue-600 bg-blue-50/50' : 'text-slate-800 hover:bg-slate-50'}`}
-                    >
-                      {option.label}
-                      {dateRange === option.id && <Check size={20} className="text-blue-600" />}
-                    </button>
-                  ))}
-                </div>
-                <button 
-                  onClick={() => setShowDateModal(false)}
-                  className="w-full mt-6 p-4 bg-slate-900 text-white rounded-2xl font-bold text-sm"
-                >
-                  Đóng
-                </button>
-              </div>
+      <div className="md:hidden flex flex-col gap-3 p-3 pb-24">
+        {/* Simplified Date Selector */}
+        <div className="flex items-center justify-between mb-1 pb-1">
+          <h2 className="text-xl font-bold text-slate-800 tracking-tight shrink-0">Tổng quan</h2>
+          <div className="relative max-w-[65%]">
+            <div className="bg-blue-50 text-blue-600 rounded-lg text-[13px] font-bold px-3 py-2 flex items-center justify-end gap-1 shadow-sm border border-blue-100">
+              <span className="truncate">{getRangeLabel()}</span>
+              <ChevronDown size={14} className="shrink-0" />
             </div>
-          )}
+            <select
+              value={dateRange}
+              onChange={(e) => setDateRange(e.target.value as any)}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-right appearance-none"
+            >
+              <option value="today">Hôm nay</option>
+              <option value="yesterday">Hôm qua</option>
+              <option value="last_7_days">7 ngày qua</option>
+              <option value="this_month">Tháng này</option>
+              <option value="last_month">Tháng trước</option>
+              <option value="this_year">Năm nay</option>
+            </select>
+          </div>
         </div>
 
         {/* Summary Card */}
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 space-y-4">
           <div className="flex justify-between items-start gap-2">
             <div className="min-w-0 flex-1">
-              <p className="text-slate-400 text-[11px] font-bold uppercase tracking-wider mb-1 truncate">Doanh thu ({stats.totalOrders} đơn)</p>
-              <div className="flex items-baseline gap-1 flex-wrap">
-                <span className="text-2xl sm:text-3xl font-black text-blue-600 tracking-tighter break-all">{formatKilo(stats.totalRevenue)}</span>
-                <span className="text-xs font-bold text-slate-500">đ</span>
+              <p className="text-slate-400 text-[11px] font-normal tracking-wider mb-1 truncate">Doanh thu ({stats.totalOrders} đơn)</p>
+              <div className="flex items-baseline gap-1 overflow-hidden">
+                <span className="text-2xl sm:text-3xl font-bold text-blue-600 tracking-tight truncate">{formatKilo(stats.totalRevenue)}</span>
+                <span className="text-[10px] font-medium text-slate-500 shrink-0">đ</span>
               </div>
             </div>
-            <div className="text-right shrink-0">
+            <div className="text-right shrink-0 max-w-[50%]">
               <div className="flex items-center justify-end gap-2 mb-1">
-                <p className="text-slate-400 text-[11px] font-bold uppercase tracking-wider">Lợi nhuận</p>
-                <button onClick={() => setShowProfit(!showProfit)} className="text-slate-400">
+                <p className="text-slate-400 text-[11px] font-normal tracking-wider">Lợi nhuận</p>
+                <button onClick={() => setShowProfit(!showProfit)} className="text-slate-400 shrink-0">
                   {showProfit ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
-              <div className="flex items-baseline justify-end gap-1 flex-wrap">
+              <div className="flex items-baseline justify-end gap-1 overflow-hidden">
                 {showProfit ? (
                   <>
-                    <span className="text-xl sm:text-2xl font-black text-emerald-500 tracking-tighter break-all">{formatKilo(stats.totalProfit)}</span>
-                    <span className="text-[10px] font-bold text-slate-500">đ</span>
+                    <span className="text-xl sm:text-2xl font-bold text-emerald-500 tracking-tight truncate">{formatKilo(stats.totalProfit)}</span>
+                    <span className="text-[10px] font-medium text-slate-500 shrink-0">đ</span>
                   </>
                 ) : (
-                  <span className="text-xl sm:text-2xl font-black text-emerald-500 tracking-widest">*** ***</span>
+                  <span className="text-xl sm:text-2xl font-bold text-emerald-500 tracking-widest shrink-0">*** ***</span>
                 )}
               </div>
             </div>
@@ -367,60 +481,90 @@ export const Dashboard: React.FC = () => {
           
           <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-50">
             <div className="min-w-0">
-              <p className="text-slate-400 text-[11px] font-bold uppercase tracking-wider mb-1 truncate">Tiền vào (Sổ quỹ)</p>
-              <div className="flex items-baseline gap-1 flex-wrap">
-                <span className="text-lg sm:text-xl font-black text-emerald-600 tracking-tighter break-all">+{formatKilo(stats.totalCashIn)}</span>
-                <span className="text-[10px] font-bold text-slate-500">đ</span>
+              <p className="text-slate-400 text-[11px] font-normal tracking-wider mb-1 truncate">Tiền vào</p>
+              <div className="flex items-baseline gap-1 overflow-hidden">
+                <span className="text-lg sm:text-xl font-bold text-emerald-600 tracking-tight truncate">+{formatKilo(stats.totalCashIn)}</span>
+                <span className="text-[10px] font-medium text-slate-500 shrink-0">đ</span>
               </div>
             </div>
             <div className="text-right min-w-0">
-              <p className="text-slate-400 text-[11px] font-bold uppercase tracking-wider mb-1 truncate">Tiền ra (Sổ quỹ)</p>
-              <div className="flex items-baseline justify-end gap-1 flex-wrap">
-                <span className="text-lg sm:text-xl font-black text-rose-600 tracking-tighter break-all">-{formatKilo(stats.totalCashOut)}</span>
-                <span className="text-[10px] font-bold text-slate-500">đ</span>
+              <p className="text-slate-400 text-[11px] font-normal tracking-wider mb-1 truncate">Tiền ra</p>
+              <div className="flex items-baseline justify-end gap-1 overflow-hidden">
+                <span className="text-lg sm:text-xl font-bold text-rose-600 tracking-tight truncate">-{formatKilo(stats.totalCashOut)}</span>
+                <span className="text-[10px] font-medium text-slate-500 shrink-0">đ</span>
               </div>
             </div>
           </div>
 
           <div className="pt-4 border-t border-slate-50 flex items-center gap-2 text-slate-500 overflow-hidden">
             <RotateCcw size={16} className="text-orange-400 shrink-0" />
-            <span className="text-xs font-bold truncate">{stats.returnCount} đơn trả hàng - </span>
-            <span className="text-xs font-black text-slate-800 truncate">{formatKilo(stats.totalReturns)} đ</span>
+            <span className="text-xs font-normal truncate">{stats.returnCount} đơn trả hàng - </span>
+            <span className="text-sm font-medium text-slate-800 tracking-tight truncate">{formatKilo(stats.totalReturns)} đ</span>
           </div>
         </div>
 
         {/* Quick Menu */}
         <div className="grid grid-cols-5 gap-2 py-2">
-          <Link to="/reports" className="flex flex-col items-center gap-2">
+          <Link to="/import" className="flex flex-col items-center gap-2">
             <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center text-white shadow-md shadow-blue-100">
-              <BarChart3 size={24} />
+              <Truck size={22} />
             </div>
-            <span className="text-[9px] font-bold text-slate-600 text-center leading-tight">Thống kê chi tiêu</span>
+            <span className="text-[11px] sm:text-xs font-bold text-slate-600 text-center leading-tight">Nhập<br />hàng hóa</span>
           </Link>
-          <Link to="/inventory" className="flex flex-col items-center gap-2">
-            <div className="w-12 h-12 bg-sky-400 rounded-full flex items-center justify-center text-white shadow-md shadow-sky-100">
-              <Box size={24} />
+          <Link to="/return-import" className="flex flex-col items-center gap-2">
+            <div className="w-12 h-12 bg-orange-400 rounded-full flex items-center justify-center text-white shadow-md shadow-orange-100">
+              <RotateCcw size={22} />
             </div>
-            <span className="text-[9px] font-bold text-slate-600 text-center leading-tight">Hàng hóa</span>
+            <span className="text-[11px] sm:text-xs font-bold text-slate-600 text-center leading-tight">Hoàn hàng<br />nhập</span>
+          </Link>
+          <Link to="/maintenance" className="flex flex-col items-center gap-2">
+            <div className="w-12 h-12 bg-violet-400 rounded-full flex items-center justify-center text-white shadow-md shadow-violet-100">
+              <Wrench size={22} />
+            </div>
+            <span className="text-[11px] sm:text-xs font-bold text-slate-600 text-center leading-tight">Bảo hành<br />sửa chữa</span>
           </Link>
           <Link to="/cash-ledger" className="flex flex-col items-center gap-2">
             <div className="w-12 h-12 bg-emerald-400 rounded-full flex items-center justify-center text-white shadow-md shadow-emerald-100">
-              <Wallet size={24} />
+              <Wallet size={22} />
             </div>
-            <span className="text-[9px] font-bold text-slate-600 text-center leading-tight">Sổ quỹ</span>
+            <span className="text-[11px] sm:text-xs font-bold text-slate-600 text-center leading-tight px-1">Sổ quỹ</span>
           </Link>
           <Link to="/users" className="flex flex-col items-center gap-2">
             <div className="w-12 h-12 bg-indigo-400 rounded-full flex items-center justify-center text-white shadow-md shadow-indigo-100">
-              <Users size={24} />
+              <Users size={22} />
             </div>
-            <span className="text-[9px] font-bold text-slate-600 text-center leading-tight">Nhân viên</span>
+            <span className="text-[11px] sm:text-xs font-bold text-slate-600 text-center leading-tight px-1">Nhân viên</span>
           </Link>
-          <Link to="/reports" className="flex flex-col items-center gap-2">
-            <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white shadow-md shadow-blue-200">
-              <PieChart size={24} />
+        </div>
+
+        {/* Top Selling Products - Mobile */}
+        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 mb-4">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-bold text-lg text-slate-800 tracking-tight flex items-center gap-2">
+              <TrendingUp size={18} className="text-blue-500" /> Sản phẩm bán chạy <span className="text-[10px] font-normal text-slate-400 mt-0.5">(trong năm nay)</span>
+            </h3>
+          </div>
+          
+          {topProductsYearly.length > 0 ? (
+            <div className="flex flex-col gap-3">
+              {topProductsYearly.map((p, i) => (
+                <div key={i} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${i === 0 ? 'bg-yellow-100 text-yellow-700' : i === 1 ? 'bg-slate-200 text-slate-700' : i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-blue-50 text-blue-600'}`}>
+                    #{i + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-sm text-slate-800 truncate">{p.name}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xs font-bold text-blue-600">{formatNumber(p.revenue)}đ</span>
+                      <span className="text-[10px] text-slate-400 font-medium">({p.qty} sl)</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
-            <span className="text-[9px] font-bold text-slate-600 text-center leading-tight">Báo cáo</span>
-          </Link>
+          ) : (
+             <div className="text-center py-6 text-slate-400 italic text-sm">Chưa có dữ liệu bán hàng.</div>
+          )}
         </div>
 
         {/* Revenue Chart Card */}

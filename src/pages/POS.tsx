@@ -1,19 +1,59 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Search, Plus, UserPlus, UserCircle, CheckCircle, X, Trash2, Printer, Barcode, ChevronDown, Edit3, PieChart, ShoppingCart, Tag, Image as ImageIcon, ArrowLeft, Info } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { Search, Plus, UserPlus, UserCircle, CheckCircle, X, Trash2, Printer, Barcode, ChevronDown, Edit3, PieChart, ShoppingCart, Tag, Image as ImageIcon, ArrowLeft, Info, FileText, Wallet } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { Product, InvoiceItem, Customer, CashTransaction } from '../types';
 import { formatNumber, parseFormattedNumber } from '../lib/utils';
 import { generateId } from '../lib/idUtils';
+import { NumericFormat } from 'react-number-format';
 import { PrintTemplate } from '../components/PrintTemplate';
+import { ProductDetailModal } from '../components/ProductDetailModal';
+import { useScrollLock } from '../hooks/useScrollLock';
+import { useMobileBackModal } from '../hooks/useMobileBackModal';
 
 export const POS: React.FC = () => {
   const navigate = useNavigate();
-  const { products, customers, invoices, cashTransactions, addInvoice, addCustomer, updateProduct, serials, addStockCard, addCashTransaction, posDraft, setPOSDraft, returnSalesOrders } = useAppContext();
+  const location = useLocation();
+  const { products, customers, invoices, cashTransactions, addInvoice, updateInvoice, deleteInvoice, addCustomer, updateProduct, serials, addStockCard, addCashTransaction, posDraft, setPOSDraft, returnSalesOrders } = useAppContext();
   const [searchTerm, setSearchTerm] = useState('');
+  const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
+  
+  useMobileBackModal(!!viewingProduct, () => setViewingProduct(null));
   
   // Initialize from draft or defaults
   const [tabs, setTabs] = useState(() => {
+    // Check if we are editing an invoice passed via location state
+    const editInvoice = location.state?.editInvoice;
+    if (editInvoice) {
+      // Map invoice items to POS items format
+      const cartItems = editInvoice.items.map((item: any) => {
+        const prod = products.find(p => p.id === item.id);
+        return {
+          ...prod,
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          qty: item.qty,
+          sn: item.sn || '',
+          serials: item.sn ? (typeof item.sn === 'string' ? item.sn.split(',').map((s: string) => s.trim()) : item.sn) : []
+        };
+      });
+
+      const customer = customers.find(c => c.name === editInvoice.customer);
+
+      return [{
+        id: Date.now(),
+        name: `Sửa ${editInvoice.id}`,
+        cart: cartItems,
+        discount: editInvoice.discount || 0,
+        paid: editInvoice.paid.toString(),
+        selectedCustomer: customer || { id: 'temp', name: editInvoice.customer, phone: editInvoice.phone || '' },
+        note: editInvoice.note || '',
+        paymentMethod: 'CASH',
+        editingInvoiceId: editInvoice.id // Track that we are editing this invoice
+      }];
+    }
+
     if (posDraft?.tabs && posDraft.tabs.length > 0) {
       return posDraft.tabs;
     }
@@ -37,7 +77,7 @@ export const POS: React.FC = () => {
 
   // Current tab helper
   const currentTab = tabs[activeTab] || tabs[0];
-  const { cart, discount, paid, selectedCustomer, note, paymentMethod } = currentTab;
+  const { cart, discount, paid, selectedCustomer, note, paymentMethod, editingInvoiceId } = currentTab;
 
   // Setters for current tab
   const updateCurrentTab = (updates: Partial<typeof currentTab>) => {
@@ -96,7 +136,12 @@ export const POS: React.FC = () => {
   // Print State
   const [printData, setPrintData] = useState<any>(null);
   const [showSuccessModal, setShowSuccessModal] = useState<{id: string, total: number} | null>(null);
+
+  // Lock scroll for modals
+  useScrollLock(!!viewingProduct || isCustomerModalOpen || isSerialModalOpen || isQuickAddModalOpen || !!showSuccessModal);
   const [showDraftPrompt, setShowDraftPrompt] = useState(false);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [checkoutConfirmModal, setCheckoutConfirmModal] = useState<{isOpen: boolean, type: 'EDIT' | 'NORMAL'} | null>(null);
 
   useEffect(() => {
     if (posDraft?.tabs && posDraft.tabs.some(t => t.cart.length > 0)) {
@@ -141,15 +186,19 @@ export const POS: React.FC = () => {
   const [customerSuggestions, setCustomerSuggestions] = useState<Customer[]>([]);
 
   useEffect(() => {
-    if (searchTerm.trim()) {
-      const filtered = (products || []).filter(p => 
-        (p.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
-        (p.id || '').toLowerCase().includes(searchTerm.toLowerCase())
-      );
-      setProductSuggestions(filtered);
-    } else {
-      setProductSuggestions([]);
-    }
+    const handler = setTimeout(() => {
+      if (searchTerm.trim()) {
+        const filtered = (products || []).filter(p => 
+          (p.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+          (p.id || '').toLowerCase().includes(searchTerm.toLowerCase())
+        );
+        setProductSuggestions(filtered.slice(0, 30));
+      } else {
+        setProductSuggestions([]);
+      }
+    }, 300);
+
+    return () => clearTimeout(handler);
   }, [searchTerm, products]);
 
   const handleCustomerSearch = (val: string) => {
@@ -254,95 +303,106 @@ export const POS: React.FC = () => {
 
   const handleCheckout = async (autoPrint: boolean = false) => {
     if (cart.length === 0) return alert('Giỏ hàng trống!');
-    
-    const now = new Date();
-    const invoiceId = generateId('HD', invoices);
-    const dateStr = now.toLocaleString('vi-VN');
-    const customerName = selectedCustomer ? selectedCustomer.name : 'Khách lẻ';
+    if (isCheckingOut) return;
 
-    const invoice = {
-      id: invoiceId,
-      date: dateStr,
-      customer: customerName,
-      phone: selectedCustomer ? selectedCustomer.phone : '---',
-      address: selectedCustomer?.address || '',
-      total: finalTotal,
-      paid: paidAmount,
-      debt: debt < 0 ? Math.abs(debt) : 0,
-      discount: discount,
-      items: cart.map(item => {
-        const p = products.find(prod => prod.id === item.id);
-        let warrantyExpiry = undefined;
-        if (p?.warrantyMonths) {
-          const expiryDate = new Date();
-          expiryDate.setMonth(expiryDate.getMonth() + p.warrantyMonths);
-          warrantyExpiry = expiryDate.toLocaleDateString('vi-VN');
-        }
-        return {
-          id: item.id,
-          name: item.name,
-          price: item.price,
-          qty: item.qty,
-          sn: item.serials?.join(', '),
-          importPriceTotal: item.importPriceTotal ? item.importPriceTotal * item.qty : 0,
-          warrantyExpiry
-        };
-      })
-    };
-
-    // Update stock and add stock cards
-    for (const item of cart) {
-      const p = products.find(x => x.id === item.id);
-      if (p && !p.isService) {
-        updateProduct(item.id, { stock: (p.stock || 0) - item.qty }, true);
-      }
+    // Handle Edit Mode Confirmation
+    if (currentTab.editingInvoiceId && !checkoutConfirmModal?.isOpen) {
+      setCheckoutConfirmModal({ isOpen: true, type: 'EDIT' });
+      return;
     }
 
-    // Record Cash Transaction if paid > 0
-    if (invoice.paid > 0) {
-      const transactionId = generateId('PT', cashTransactions);
-      const newTransaction: CashTransaction = {
-        id: transactionId,
+    try {
+      setIsCheckingOut(true);
+      // Handle Edit Mode: We no longer need to delete the invoice first.
+      // addInvoice now handles Upsert logic internally.
+      
+      const now = new Date();
+      const invoiceId = currentTab.editingInvoiceId || generateId('HD', invoices);
+      const dateStr = now.toLocaleString('vi-VN');
+      const customerName = selectedCustomer ? selectedCustomer.name : 'Khách lẻ';
+
+      const invoice = {
+        id: invoiceId,
         date: dateStr,
-        type: 'RECEIPT',
-        amount: invoice.paid,
-        category: 'SALES_REVENUE',
-        partner: customerName,
-        note: `Thu tiền hóa đơn ${invoiceId}`,
-        refId: invoiceId
+        customer: customerName,
+        phone: selectedCustomer ? selectedCustomer.phone : '---',
+        address: selectedCustomer?.address || '',
+        total: finalTotal,
+        paid: paidAmount,
+        debt: debt < 0 ? Math.abs(debt) : 0,
+        discount: discount,
+        items: cart.map(item => {
+          const p = products.find(prod => prod.id === item.id);
+          let warrantyExpiry = undefined;
+          if (p?.warrantyMonths) {
+            const expiryDate = new Date();
+            expiryDate.setMonth(expiryDate.getMonth() + p.warrantyMonths);
+            warrantyExpiry = expiryDate.toLocaleDateString('vi-VN');
+          }
+          return {
+            id: item.id,
+            name: item.name,
+            price: item.price,
+            qty: item.qty,
+            sn: item.serials?.join(', '),
+            importPriceTotal: item.importPriceTotal ? item.importPriceTotal * item.qty : 0,
+            warrantyExpiry
+          };
+        })
       };
-      addCashTransaction(newTransaction);
-    }
 
-    const savedInvoice = await addInvoice(invoice);
-    
-    if (autoPrint && savedInvoice) {
-      handlePrint({
-        title: 'HÓA ĐƠN BÁN HÀNG',
-        id: savedInvoice.id,
-        date: savedInvoice.date,
-        partner: savedInvoice.customer,
-        phone: savedInvoice.phone,
-        address: savedInvoice.address || selectedCustomer?.address || '',
-        items: savedInvoice.items.map(i => ({ ...i, total: i.qty * i.price })),
-        total: savedInvoice.total,
-        paid: savedInvoice.paid,
-        debt: savedInvoice.debt || 0,
-        oldDebt: savedInvoice.oldDebt || 0,
-        discount: savedInvoice.discount || 0,
-        type: 'HOA_DON'
-      });
-    }
+      // Record Cash Transaction if paid > 0
+      if (invoice.paid > 0) {
+        const transactionId = generateId('PT', cashTransactions);
+        const newTransaction: CashTransaction = {
+          id: transactionId,
+          date: dateStr,
+          type: 'RECEIPT',
+          amount: invoice.paid,
+          category: 'SALES_REVENUE',
+          partner: customerName,
+          note: `Thu tiền hóa đơn ${invoiceId}`,
+          refId: invoiceId
+        };
+        addCashTransaction(newTransaction);
+      }
 
-    setCart([]);
-    setDiscount(0);
-    setPaid('');
-    setSelectedCustomer(null);
-    setNote('');
-    setPaymentMethod('CASH');
-    setIsMobileCheckoutOpen(false);
-    
-    setShowSuccessModal({ id: invoiceId, total: invoice.total });
+      const savedInvoice = await addInvoice(invoice as any);
+      
+      if (autoPrint && savedInvoice) {
+        handlePrint({
+          title: 'HÓA ĐƠN BÁN HÀNG',
+          id: savedInvoice.id,
+          date: savedInvoice.date,
+          partner: savedInvoice.customer,
+          phone: savedInvoice.phone,
+          address: savedInvoice.address || selectedCustomer?.address || '',
+          items: savedInvoice.items.map(i => ({ ...i, total: i.qty * i.price })),
+          total: savedInvoice.total,
+          paid: savedInvoice.paid,
+          debt: savedInvoice.debt || 0,
+          oldDebt: savedInvoice.oldDebt || 0,
+          discount: savedInvoice.discount || 0,
+          type: 'HOA_DON'
+        });
+      }
+
+      setCart([]);
+      setDiscount(0);
+      setPaid('');
+      setSelectedCustomer(null);
+      setNote('');
+      setPaymentMethod('CASH');
+      setIsMobileCheckoutOpen(false);
+      setCheckoutConfirmModal(null);
+      
+      setShowSuccessModal({ id: invoiceId, total: invoice.total });
+    } catch (error) {
+      console.error("Checkout failed:", error);
+      alert("Thanh toán thất bại. Vui lòng thử lại.");
+    } finally {
+      setIsCheckingOut(false);
+    }
   };
 
   const handleSaveDraft = () => {
@@ -351,7 +411,7 @@ export const POS: React.FC = () => {
   };
 
   return (
-    <div className="h-full flex flex-col bg-slate-100 font-sans overflow-hidden">
+    <div className="flex flex-col bg-slate-100 font-sans">
       {/* Print Template Container */}
       {printData && <PrintTemplate {...printData} />}
 
@@ -413,9 +473,16 @@ export const POS: React.FC = () => {
                 <div 
                   key={`${p.id}-${idx}`} 
                   onClick={() => addToCart(p)}
-                  className="p-3 border-b border-slate-50 hover:bg-blue-50 flex justify-between items-center cursor-pointer transition-colors"
+                  className="p-3 border-b border-slate-50 hover:bg-blue-50 flex gap-3 items-center cursor-pointer transition-colors"
                 >
-                  <div>
+                  <div className="w-10 h-10 rounded border border-slate-100 bg-slate-50 flex-shrink-0 flex items-center justify-center overflow-hidden">
+                    {p.image ? (
+                      <img src={p.image} alt={p.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      <ImageIcon size={18} className="text-slate-300" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
                     <p className="text-xs font-bold text-slate-800">{p.name}</p>
                     <p className="text-[10px] text-slate-400 font-medium mt-0.5">Mã: {p.id} | Tồn: {p.stock}</p>
                   </div>
@@ -478,11 +545,6 @@ export const POS: React.FC = () => {
               <ShoppingCart size={20} />
               <span className="absolute -top-1 -right-1 bg-red-500 text-[9px] font-bold px-1 rounded-full">{cart.length}</span>
             </div>
-            <Printer className="cursor-pointer hover:bg-white/10 p-1.5 rounded" size={20} />
-            <div className="flex items-center gap-1 cursor-pointer hover:bg-white/10 px-2 py-1 rounded">
-              <span className="text-xs font-bold">vinba</span>
-              <ChevronDown size={14} />
-            </div>
           </div>
         </div>
       </div>
@@ -523,9 +585,21 @@ export const POS: React.FC = () => {
                               <Trash2 size={16} />
                             </button>
                           </td>
-                          <td className="px-4 py-4 text-xs font-bold text-slate-600">{item.id}</td>
+                          <td className="px-4 py-4 text-xs font-bold text-blue-600 cursor-pointer hover:underline" onClick={() => {
+                            const p = products.find(x => x.id === item.id);
+                            if (p) setViewingProduct(p);
+                          }}>{item.id}</td>
                           <td className="px-4 py-4">
-                            <p className="text-xs font-bold text-slate-800">{item.name}</p>
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded border border-slate-100 bg-slate-50 flex-shrink-0 flex items-center justify-center overflow-hidden">
+                                {products.find(p => p.id === item.id)?.image ? (
+                                  <img src={products.find(p => p.id === item.id)?.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <ImageIcon size={14} className="text-slate-300" />
+                                )}
+                              </div>
+                              <p className="text-xs font-bold text-slate-800">{item.name}</p>
+                            </div>
                             {item.hasSerial && (
                               <div className="mt-2 flex flex-wrap gap-1">
                                 {item.serials?.map((sn, sIdx) => (
@@ -568,10 +642,11 @@ export const POS: React.FC = () => {
                             </div>
                           </td>
                           <td className="px-4 py-4 text-right text-xs font-bold text-slate-600">
-                            <input 
-                              type="text" 
-                              value={formatNumber(item.price)}
-                              onChange={(e) => updatePrice(item.id, parseFormattedNumber(e.target.value))}
+                            <NumericFormat 
+                              value={item.price}
+                              onValueChange={(values) => updatePrice(item.id, values.floatValue || 0)}
+                              thousandSeparator="."
+                              decimalSeparator=","
                               className="w-24 text-right bg-transparent outline-none border-b border-dashed border-slate-300 focus:border-blue-500"
                             />
                           </td>
@@ -670,10 +745,11 @@ export const POS: React.FC = () => {
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-slate-600 font-medium">Giảm giá</span>
-                <input 
-                  type="text" 
-                  value={formatNumber(discount)} 
-                  onChange={(e) => setDiscount(parseFormattedNumber(e.target.value))}
+                <NumericFormat 
+                  value={discount} 
+                  onValueChange={(values) => setDiscount(values.floatValue || 0)}
+                  thousandSeparator="."
+                  decimalSeparator=","
                   className="w-24 text-right border-b border-slate-200 bg-transparent px-1 py-0.5 text-sm font-semibold outline-none focus:border-blue-500" 
                 />
               </div>
@@ -700,10 +776,11 @@ export const POS: React.FC = () => {
                     <PieChart size={12} />
                   </div>
                 </div>
-                <input 
-                  type="text" 
+                <NumericFormat 
                   value={paid}
-                  onChange={(e) => setPaid(formatNumber(parseFormattedNumber(e.target.value)))}
+                  onValueChange={(values) => setPaid(values.formattedValue)}
+                  thousandSeparator="."
+                  decimalSeparator=","
                   className="w-32 text-right border-b border-blue-500 bg-transparent px-1 py-0.5 text-lg font-bold text-blue-600 outline-none" 
                 />
               </div>
@@ -754,12 +831,17 @@ export const POS: React.FC = () => {
           <div className="mt-auto p-4 flex gap-2 bg-slate-50 border-t border-slate-200">
             <button 
               onClick={() => handleCheckout(true)}
-              className="flex-1 h-12 bg-slate-500 text-white font-semibold rounded shadow-md hover:bg-slate-600 transition-all flex items-center justify-center gap-2"
+              disabled={isCheckingOut}
+              className={`flex-1 h-12 text-white font-semibold rounded shadow-md transition-all flex items-center justify-center gap-2 ${isCheckingOut ? 'bg-slate-400 cursor-not-allowed' : 'bg-slate-500 hover:bg-slate-600'}`}
             >
-              <Printer size={18} /> <span className="hidden sm:inline">In</span>
+              <Printer size={18} /> <span className="hidden sm:inline">{isCheckingOut ? '...' : 'In'}</span>
             </button>
-            <button onClick={() => handleCheckout(false)} className="flex-[3] h-12 bg-blue-600 text-white font-semibold rounded shadow-md hover:bg-blue-700 transition-all flex items-center justify-center gap-2 text-lg">
-              Thanh toán
+            <button 
+              onClick={() => handleCheckout(false)} 
+              disabled={isCheckingOut}
+              className={`flex-[3] h-12 text-white font-semibold rounded shadow-md transition-all flex items-center justify-center gap-2 text-lg ${isCheckingOut ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+            >
+              {isCheckingOut ? 'Đang lưu...' : 'Thanh toán'}
             </button>
           </div>
         </div>
@@ -811,7 +893,7 @@ export const POS: React.FC = () => {
         </div>
 
         {/* Cart Items */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-3 pb-32">
+        <div className="flex-1 overflow-y-auto p-3 space-y-3 pb-64">
           {cart.length === 0 ? (
             <div className="py-20 text-center text-slate-400 italic text-sm">
               Chưa có sản phẩm nào trong giỏ hàng
@@ -822,8 +904,12 @@ export const POS: React.FC = () => {
                 <button onClick={() => removeFromCart(item.id)} className="absolute top-2 right-2 text-slate-300 hover:text-red-500 p-1">
                   <X size={16} />
                 </button>
-                <div className="w-16 h-16 bg-blue-50 rounded-lg flex items-center justify-center text-blue-200 shrink-0">
-                  <ImageIcon size={24} />
+                <div className="w-16 h-16 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-center text-blue-200 shrink-0 overflow-hidden">
+                  {products.find(x => x.id === item.id)?.image ? (
+                    <img src={products.find(x => x.id === item.id)?.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    <ImageIcon size={24} className="text-slate-300" />
+                  )}
                 </div>
                 <div className="flex-1 flex flex-col justify-between pr-6">
                   <div className="text-sm font-medium text-slate-800 leading-tight">{item.name}</div>
@@ -852,10 +938,11 @@ export const POS: React.FC = () => {
 
                   <div className="flex items-center justify-between mt-2">
                     <div className="text-sm font-bold text-blue-600">
-                      <input 
-                        type="text" 
-                        value={formatNumber(item.price)}
-                        onChange={(e) => updatePrice(item.id, parseFormattedNumber(e.target.value))}
+                      <NumericFormat 
+                        value={item.price}
+                        onValueChange={(values) => updatePrice(item.id, values.floatValue || 0)}
+                        thousandSeparator="."
+                        decimalSeparator=","
                         className="w-24 bg-transparent outline-none border-b border-dashed border-blue-300 focus:border-blue-600 text-blue-600"
                       />
                     </div>
@@ -872,21 +959,29 @@ export const POS: React.FC = () => {
         </div>
 
         {/* Bottom Bar */}
-        {cart.length > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 bg-white p-4 rounded-t-2xl shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-20">
-            <div className="flex justify-between items-center mb-4">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-bold text-slate-800">Tổng tiền hàng</span>
-                <span className="w-6 h-6 rounded-full border border-blue-500 text-blue-600 flex items-center justify-center text-xs font-bold">{cart.length}</span>
+        <div className="absolute bottom-0 left-0 right-0 bg-slate-50/95 backdrop-blur-md p-4 flex flex-col gap-3 z-40 border-t border-slate-200">
+          {cart.length > 0 && (
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 space-y-4">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-slate-800">Tổng tiền hàng</span>
+                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-black">{cart.length}</span>
+                </div>
+                <span className="text-xl font-black text-slate-800">{formatNumber(totalGoods)}</span>
               </div>
-              <span className="text-lg font-bold text-slate-800">{formatNumber(totalGoods)}</span>
+              <div className="flex gap-3">
+                <button className="flex-1 py-3 px-2 rounded-xl border-2 border-blue-600 text-blue-600 font-bold text-sm bg-white active:scale-95 transition-all" onClick={handleSaveDraft}>Lưu tạm</button>
+                <button className="flex-1 py-3 px-2 rounded-xl bg-blue-600 text-white font-bold text-sm shadow-lg shadow-blue-200 active:scale-95 transition-all" onClick={() => setIsMobileCheckoutOpen(true)}>Thanh toán</button>
+              </div>
             </div>
-            <div className="flex gap-3">
-              <button className="flex-1 py-3 rounded-xl border border-blue-600 text-blue-600 font-bold text-sm bg-white" onClick={handleSaveDraft}>Lưu tạm</button>
-              <button className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-bold text-sm" onClick={() => setIsMobileCheckoutOpen(true)}>Thanh toán</button>
-            </div>
-          </div>
-        )}
+          )}
+          <button 
+            onClick={() => navigate(-1)} 
+            className="w-full py-3 bg-[#991b1b] text-white font-black rounded-lg uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors active:scale-95 shadow-lg shadow-red-100 shrink-0"
+          >
+            Đóng
+          </button>
+        </div>
       </div>
 
       {/* Success Modal */}
@@ -947,6 +1042,40 @@ export const POS: React.FC = () => {
               >
                 Tiếp tục bán hàng
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {checkoutConfirmModal?.isOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in duration-200">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <FileText size={32} />
+              </div>
+              <h3 className="text-xl font-bold text-slate-800 mb-2">Xác nhận cập nhật</h3>
+              <p className="text-sm text-slate-500 mb-6">
+                Bạn đang sửa hóa đơn <span className="font-bold text-blue-600">{currentTab.editingInvoiceId}</span>. 
+                Hệ thống sẽ cập nhật lại tồn kho, số serial và công nợ khách hàng. Tiếp tục?
+              </p>
+              
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setCheckoutConfirmModal(null)}
+                  className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors"
+                >
+                  Hủy bỏ
+                </button>
+                <button 
+                  onClick={() => handleCheckout(false)}
+                  disabled={isCheckingOut}
+                  className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-200 hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  {isCheckingOut ? 'Đang lưu...' : 'Đồng ý'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1067,22 +1196,29 @@ export const POS: React.FC = () => {
           </div>
           <div className="flex-1 overflow-y-auto">
             {(searchTerm.trim() ? productSuggestions : products).map((p, idx) => (
-              <div 
-                key={`${p.id}-${idx}`} 
-                onClick={() => {
-                  addToCart(p);
-                  setIsMobileProductSearchOpen(false);
-                }}
-                className="p-4 border-b border-slate-50 flex justify-between items-center cursor-pointer"
-              >
-                <div>
-                  <p className="text-sm font-bold text-slate-800">{p.name}</p>
-                  <p className="text-xs text-slate-400 font-medium mt-0.5">Mã: {p.id} | Tồn: {p.stock}</p>
+                <div 
+                  key={`${p.id}-${idx}`} 
+                  onClick={() => {
+                    addToCart(p);
+                    setIsMobileProductSearchOpen(false);
+                  }}
+                  className="p-3 border-b border-slate-50 flex gap-3 items-center cursor-pointer"
+                >
+                  <div className="w-12 h-12 rounded-lg border border-slate-100 bg-slate-50 flex-shrink-0 flex items-center justify-center overflow-hidden">
+                    {p.image ? (
+                      <img src={p.image} alt={p.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      <ImageIcon size={20} className="text-slate-300" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-slate-800">{p.name}</p>
+                    <p className="text-xs text-slate-400 font-medium mt-0.5">Mã: {p.id} | Tồn: {p.stock}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-sm font-bold text-blue-600">{formatNumber(p.price)}đ</p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-sm font-bold text-blue-600">{formatNumber(p.price)}đ</p>
-                </div>
-              </div>
             ))}
             {searchTerm && productSuggestions.length === 0 && (
               <div className="p-8 text-center">
@@ -1177,10 +1313,11 @@ export const POS: React.FC = () => {
               </div>
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Giá bán (đ)</label>
-                <input 
-                  type="text" 
+                <NumericFormat 
                   value={quickAddPrice}
-                  onChange={(e) => setQuickAddPrice(formatNumber(parseFormattedNumber(e.target.value)))}
+                  onValueChange={(values) => setQuickAddPrice(values.formattedValue)}
+                  thousandSeparator="."
+                  decimalSeparator=","
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none focus:border-blue-400" 
                   placeholder="0" 
                 />
@@ -1242,10 +1379,11 @@ export const POS: React.FC = () => {
               
               <div className="flex justify-between items-center border-b border-slate-100 pb-2">
                 <span className="text-sm font-bold text-slate-800">Giảm giá (%)</span>
-                <input 
-                  type="text" 
-                  value={formatNumber(discount)} 
-                  onChange={(e) => setDiscount(parseFormattedNumber(e.target.value))}
+                <NumericFormat 
+                  value={discount} 
+                  onValueChange={(values) => setDiscount(values.floatValue || 0)}
+                  thousandSeparator="."
+                  decimalSeparator=","
                   className="w-24 text-right bg-transparent text-sm font-bold outline-none text-slate-800" 
                   placeholder="0"
                 />
@@ -1263,10 +1401,11 @@ export const POS: React.FC = () => {
 
               <div className="flex justify-between items-center border-b border-slate-100 pb-2">
                 <span className="text-sm font-bold text-slate-800">Khách thanh toán</span>
-                <input 
-                  type="text" 
+                <NumericFormat 
                   value={paid}
-                  onChange={(e) => setPaid(formatNumber(parseFormattedNumber(e.target.value)))}
+                  onValueChange={(values) => setPaid(values.formattedValue)}
+                  thousandSeparator="."
+                  decimalSeparator=","
                   className="w-32 text-right bg-transparent text-lg font-bold text-slate-800 outline-none" 
                   placeholder="0"
                 />
@@ -1290,15 +1429,37 @@ export const POS: React.FC = () => {
             </div>
           </div>
 
-          <div className="p-4 bg-white border-t border-slate-200 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+          <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col gap-3">
             <button 
-              onClick={handleCheckout}
-              className="w-full py-3.5 bg-blue-600 text-white font-bold rounded-xl shadow-md active:scale-95 transition-all"
+              onClick={() => handleCheckout(false)}
+              disabled={isCheckingOut}
+              className={`w-full py-4 text-white font-bold rounded-xl shadow-lg shadow-blue-200 transition-all active:scale-95 flex items-center justify-center ${isCheckingOut ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600'}`}
             >
-              Hoàn thành
+              {isCheckingOut ? 'Đang xử lý...' : 'Hoàn thành thanh toán'}
+            </button>
+            <button 
+              onClick={() => setIsMobileCheckoutOpen(false)}
+              className="w-full py-3 bg-[#991b1b] text-white font-black rounded-lg uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors active:scale-95 shadow-lg shadow-red-100"
+            >
+              Đóng
             </button>
           </div>
         </div>
+      )}
+      {/* Product Detail Modal */}
+      {viewingProduct && (
+        <ProductDetailModal 
+          product={viewingProduct} 
+          onClose={() => setViewingProduct(null)} 
+          onRefClick={(refId) => {
+            setViewingProduct(null);
+            if (refId.startsWith('HD')) {
+              navigate('/invoices');
+            } else if (refId.startsWith('NH')) {
+              navigate('/import-history');
+            }
+          }}
+        />
       )}
     </div>
   );

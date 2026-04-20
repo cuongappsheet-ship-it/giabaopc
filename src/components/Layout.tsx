@@ -10,19 +10,27 @@ export const Layout: React.FC = () => {
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
 
+  // Scroll to top on route change
+  React.useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
+
   const getPageTitle = () => {
     const currentPath = location.pathname;
     if (currentPath === '/') return 'Tổng quan';
     if (currentPath === '/inventory') return 'Hàng hóa';
     if (currentPath === '/invoices') return 'Hóa đơn';
+    if (currentPath === '/return-sales') return 'Trả hàng bán';
+    if (currentPath === '/import') return 'Nhập hàng';
+    if (currentPath === '/import-history') return 'Lịch sử nhập';
+    if (currentPath === '/return-import') return 'Trả hàng nhập';
     if (currentPath === '/customers') return 'Khách hàng';
+    if (currentPath === '/suppliers') return 'Nhà cung cấp';
     if (currentPath === '/more') return 'Nhiều hơn';
     if (currentPath === '/pos') return 'Bán hàng';
-    if (currentPath === '/import') return 'Nhập hàng';
-    if (currentPath === '/suppliers') return 'Đối tác';
     if (currentPath === '/cash-ledger') return 'Sổ quỹ';
     if (currentPath === '/reports') return 'Báo cáo';
-    if (currentPath === '/maintenance') return 'Bảo hành';
+    if (currentPath === '/maintenance') return 'Bảo hành, sửa chữa';
     if (currentPath === '/price-settings') return 'Thiết lập giá';
     if (currentPath === '/users') return 'Người dùng';
     if (currentPath === '/print-settings') return 'Cài đặt bản in';
@@ -84,19 +92,7 @@ export const Layout: React.FC = () => {
         }
       ]
     },
-    { 
-      label: 'Sau bán hàng', 
-      type: 'dropdown',
-      id: 'sau-ban-hang',
-      sections: [
-        {
-          items: [
-            { label: 'Bảo hành, bảo trì', path: '/maintenance', icon: <ShieldCheck size={14} /> },
-            { label: 'Nhận sửa chữa', path: '/maintenance?type=repair', icon: <Wrench size={14} /> },
-          ]
-        }
-      ]
-    },
+    { path: '/maintenance', label: 'Bảo hành, sửa chữa', type: 'link' },
     { path: '/cash-ledger', label: 'Sổ quỹ', type: 'link' },
     { path: '/reports', label: 'Báo cáo', type: 'link' },
     ...(currentUser?.role === 'ADMIN' ? [{
@@ -124,21 +120,25 @@ export const Layout: React.FC = () => {
   ];
 
   return (
-    <div className={`min-h-screen bg-[#f4f7fa] text-slate-800 font-sans print:bg-white print:p-0 ${location.pathname === '/pos' || location.pathname === '/import' ? 'pb-0 pt-0' : 'pb-24 pt-16'} md:pb-0 md:pt-[96px] overflow-x-hidden md:overflow-hidden flex flex-col`}>
+    <div className={`min-h-screen bg-[#f4f7fa] text-slate-800 font-sans print:bg-white print:p-0 ${location.pathname === '/pos' || location.pathname === '/import' ? 'pb-0 pt-0' : 'pb-24 pt-16'} md:pb-0 md:pt-[96px] overflow-x-hidden flex flex-col`}>
       {/* Header */}
       <header className={`fixed top-0 left-0 right-0 z-50 flex flex-col shadow-sm print:hidden ${location.pathname === '/pos' || location.pathname === '/import' ? 'hidden md:flex' : ''}`}>
         {/* Top Row */}
         <div className="flex items-center justify-between px-4 md:px-6 h-14 bg-white border-b border-slate-100 relative z-20">
           {/* Mobile Title */}
-          <div className="md:hidden flex items-center">
-            <h1 className="text-xl font-bold text-slate-800 tracking-tight">{getPageTitle()}</h1>
+          <div className="md:hidden flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center shadow-md">
+              <Store size={18} className="text-white" />
+            </div>
+            <h1 className="text-xl font-bold text-slate-800 tracking-tight">DigiKiot</h1>
           </div>
 
           <Link to="/" className="hidden md:flex items-center gap-2 cursor-pointer">
             <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center text-white font-bold text-xl shadow-md">
               <Store size={22} className="text-white" />
             </div>
-            <h1 className="font-bold text-blue-700 text-xl hidden md:block">DigiKiot ERP</h1>
+            <h1 className="font-bold text-slate-800 text-xl hidden md:block">Digikiot</h1>
+            
             {location.pathname === '/pos' && (
               <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-bold rounded-md border border-blue-200">
                 Bán hàng
@@ -147,17 +147,11 @@ export const Layout: React.FC = () => {
           </Link>
           
           <div className="flex items-center gap-4 md:gap-6">
-            {/* Mobile Icons */}
-            <div className="md:hidden flex items-center gap-4 text-slate-500">
-              <button className="p-1 hover:bg-slate-100 rounded-full transition-colors active:scale-90">
-                <Search size={20} />
-              </button>
-              <button className="p-1 hover:bg-slate-100 rounded-full transition-colors active:scale-90">
-                <ArrowLeftRight size={20} className="rotate-90" />
-              </button>
-              <button className="p-1 hover:bg-slate-100 rounded-full transition-colors active:scale-90">
-                <Settings size={20} />
-              </button>
+            {/* Mobile Title Replacement for Icons */}
+            <div className="md:hidden">
+              <span className="text-sm font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
+                {getPageTitle()}
+              </span>
             </div>
 
             <div className="hidden md:flex relative text-slate-600">
@@ -265,17 +259,17 @@ export const Layout: React.FC = () => {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 w-full max-w-[1600px] mx-auto md:p-6 md:h-[calc(100vh-96px)] overflow-y-auto">
+      <main className="flex-1 w-full max-w-[1600px] mx-auto md:p-6">
         <Outlet />
       </main>
 
       {/* Mobile Bottom Nav */}
-      <nav className={`fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-100 h-[68px] flex justify-around items-center px-1 z-50 md:hidden shadow-[0_-4px_12px_rgba(0,0,0,0.05)] print:hidden ${location.pathname === '/pos' || location.pathname === '/import' ? 'hidden' : ''}`}>
+      <nav className={`fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 h-[68px] flex justify-around items-center px-1 z-50 md:hidden shadow-[0_-4px_12px_rgba(0,0,0,0.05)] print:hidden ${location.pathname === '/pos' || location.pathname === '/import' ? 'hidden' : ''}`}>
         {mobileNavItems.map(item => (
           <Link
             key={item.path}
             to={item.path}
-            className={`flex flex-col items-center justify-center gap-1.5 w-full h-full transition-all ${location.pathname === item.path ? 'text-blue-600' : 'text-slate-400'}`}
+            className={`flex flex-col items-center justify-center gap-1.5 w-full h-full transition-all ${location.pathname === item.path ? 'text-blue-600' : 'text-slate-600'}`}
           >
             <div className={`p-2 rounded-lg ${location.pathname === item.path ? 'bg-blue-50' : ''}`}>
               {item.icon}

@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
-import { Search, Plus, Wrench, Clock, CheckCircle, ArrowLeftRight, X, User, Phone, Tag, AlertCircle, ShoppingBag, Globe, ChevronLeft, ChevronRight, FileText } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { Search, Plus, Wrench, Clock, CheckCircle, ArrowLeftRight, X, User, Phone, Tag, AlertCircle, ShoppingBag, Globe, ChevronLeft, ChevronRight, FileText, Calendar, CreditCard, Package, Printer, RotateCcw, Wallet, Edit3 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
-import { MaintenanceRecord } from '../types';
+import { MaintenanceRecord, Invoice } from '../types';
 import { formatNumber, parseFormattedNumber } from '../lib/utils';
+import { NumericFormat } from 'react-number-format';
 import { generateId } from '../lib/idUtils';
 import { apiService } from '../services/api';
+import { useScrollLock } from '../hooks/useScrollLock';
+import { useMobileBackModal } from '../hooks/useMobileBackModal';
 
 const toYMD = (dateStr: string | undefined | null) => {
   if (!dateStr) return '';
@@ -36,12 +39,14 @@ const toDMY = (dateStr: string | undefined | null) => {
 };
 
 export const Maintenance: React.FC = () => {
-  const { maintenanceRecords, addMaintenanceRecord, updateMaintenanceRecord, maintenanceTransfers, addMaintenanceTransfer, updateMaintenanceTransfer, customers, addCustomer, suppliers, addSupplier, invoices, externalSerials, addExternalSerial, currentUser, addInvoice, products, serials } = useAppContext();
+  const { maintenanceRecords, addMaintenanceRecord, updateMaintenanceRecord, maintenanceTransfers, addMaintenanceTransfer, updateMaintenanceTransfer, customers, addCustomer, suppliers, addSupplier, invoices, externalSerials, addExternalSerial, currentUser, addInvoice, products, serials, updateProduct, returnSalesOrders } = useAppContext();
   const location = useLocation();
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<MaintenanceRecord | null>(null);
+  const [selectedInvoiceForDetail, setSelectedInvoiceForDetail] = useState<Invoice | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -90,6 +95,7 @@ export const Maintenance: React.FC = () => {
   const [invoiceItems, setInvoiceItems] = useState<any[]>([]);
   const [invoiceSearchTerm, setInvoiceSearchTerm] = useState('');
   const [invoicePaid, setInvoicePaid] = useState('');
+  const [invoiceDiscount, setInvoiceDiscount] = useState(0);
 
   const [isSerialModalOpen, setIsSerialModalOpen] = useState(false);
   const [activeSerialProduct, setActiveSerialProduct] = useState<any>(null);
@@ -129,6 +135,7 @@ export const Maintenance: React.FC = () => {
           qty: 1, 
           hasSerial: true,
           serials: [sn],
+          importPriceTotal: product.importPrice || 0
         }];
       }
 
@@ -144,7 +151,8 @@ export const Maintenance: React.FC = () => {
         id: product.id, 
         name: product.name, 
         price: product.price, 
-        qty: 1 
+        qty: 1,
+        importPriceTotal: product.importPrice || 0
       }];
     });
     
@@ -165,16 +173,30 @@ export const Maintenance: React.FC = () => {
   const [newTransferSupplierName, setNewTransferSupplierName] = useState('');
   const [newTransferSupplierPhone, setNewTransferSupplierPhone] = useState('');
 
-  // Prevent background scrolling when any modal is open
-  useEffect(() => {
-    const isAnyModalOpen = isModalOpen || !!selectedRecord || isTransferModalOpen || isExternalModalOpen || isCustomerModalOpen || isTransferSupplierModalOpen || statusConfirmModal.isOpen;
-    if (isAnyModalOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-    return () => { document.body.style.overflow = 'unset'; };
-  }, [isModalOpen, selectedRecord, isTransferModalOpen, isExternalModalOpen, isCustomerModalOpen, isTransferSupplierModalOpen, statusConfirmModal.isOpen]);
+  useMobileBackModal(isModalOpen, () => setIsModalOpen(false));
+  useMobileBackModal(!!selectedRecord, () => setSelectedRecord(null));
+  useMobileBackModal(!!selectedInvoiceForDetail, () => setSelectedInvoiceForDetail(null));
+  useMobileBackModal(isTransferModalOpen, () => setIsTransferModalOpen(false));
+  useMobileBackModal(isExternalModalOpen, () => setIsExternalModalOpen(false));
+  useMobileBackModal(isCustomerModalOpen, () => setIsCustomerModalOpen(false));
+  useMobileBackModal(isTransferSupplierModalOpen, () => setIsTransferSupplierModalOpen(false));
+  useMobileBackModal(statusConfirmModal.isOpen, () => setStatusConfirmModal({ isOpen: false, newStatus: null, recordId: null }));
+  useMobileBackModal(isInvoiceModalOpen, () => setIsInvoiceModalOpen(false));
+  useMobileBackModal(isSerialModalOpen, () => setIsSerialModalOpen(false));
+
+  // Lock scroll when any modal is open
+  useScrollLock(
+    isModalOpen || 
+    !!selectedRecord || 
+    !!selectedInvoiceForDetail ||
+    isTransferModalOpen || 
+    isExternalModalOpen || 
+    isCustomerModalOpen || 
+    isTransferSupplierModalOpen || 
+    statusConfirmModal.isOpen ||
+    isInvoiceModalOpen ||
+    isSerialModalOpen
+  );
 
   const filteredRecords = (maintenanceRecords || [])
     .filter(r => {
@@ -373,43 +395,43 @@ export const Maintenance: React.FC = () => {
     }
   };
 
-  const calculateWarranty = (expiryStr: string | undefined | null) => {
-    if (!expiryStr) {
-      setDeviceWarrantyStatus(null);
-      return;
-    }
-    
-    // Parse DD/MM/YYYY text
+  const getWarrantyDays = (expiryStr: string | undefined | null) => {
+    if (!expiryStr) return null;
     const parts = expiryStr.split(/[\s,]+/);
     const datePart = parts.find(p => p.includes('/'));
-    if (!datePart) {
-      setDeviceWarrantyStatus(null);
-      return;
-    }
-    
+    if (!datePart) return null;
     const [day, month, year] = datePart.split('/');
-    if (!day || !month || !year) {
-      setDeviceWarrantyStatus(null);
-      return;
-    }
+    if (!day || !month || !year) return null;
     
     const expiryDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), 23, 59, 59);
     const now = new Date();
-    
     const diffTime = expiryDate.getTime() - now.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  };
+
+  const calculateWarranty = (expiryStr: string | undefined | null) => {
+    const diffDays = getWarrantyDays(expiryStr);
     
+    if (diffDays === null) {
+      setDeviceWarrantyStatus(null);
+      return;
+    }
+    
+    // expiryStr might have extra time info, clean it if needed for clean display
+    const parts = (expiryStr || '').split(/[\s,]+/);
+    const datePart = parts.find(p => p.includes('/')) || '';
+
     if (diffDays >= 0) {
       setDeviceWarrantyStatus({
         isExpired: false,
         days: diffDays,
-        text: `Còn bảo hành ${diffDays} ngày (đến ${expiryStr})`
+        text: `Còn bảo hành ${diffDays} ngày (đến ${datePart})`
       });
     } else {
       setDeviceWarrantyStatus({
         isExpired: true,
         days: Math.abs(diffDays),
-        text: `Ngoài bảo hành (hết hạn ${expiryStr})`
+        text: `Ngoài bảo hành (hết hạn ${datePart})`
       });
     }
   };
@@ -463,7 +485,7 @@ export const Maintenance: React.FC = () => {
   };
 
   return (
-    <div className="h-full flex flex-col px-4 md:px-0 py-4 md:py-0">
+    <div className="flex flex-col px-4 md:px-0 py-4 md:py-0">
       <div className="flex flex-col md:flex-row md:items-center gap-4 mb-6 shrink-0">
         <div className="flex-1 flex flex-col md:flex-row items-center gap-3">
           <div className="w-full bg-white px-4 py-2.5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3 focus-within:border-blue-400 transition-all">
@@ -490,13 +512,13 @@ export const Maintenance: React.FC = () => {
         </div>
         <button 
           onClick={() => setIsModalOpen(true)}
-          className="w-full md:w-auto px-6 py-3 bg-blue-600 text-white rounded-xl shadow-md flex items-center justify-center gap-2 font-semibold text-sm tracking-wide active:scale-95 transition-all hover:bg-blue-700"
+          className="hidden md:flex px-6 py-3 bg-blue-600 text-white rounded-xl shadow-md items-center justify-center gap-2 font-semibold text-sm tracking-wide active:scale-95 transition-all hover:bg-blue-700"
         >
           <Plus size={16} /> Tiếp nhận máy
         </button>
       </div>
 
-      <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col mb-6">
+      <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col mb-6">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse hidden md:table">
             <thead>
@@ -820,20 +842,40 @@ export const Maintenance: React.FC = () => {
                             if (dateStr.includes(' ')) dateStr = dateStr.split(' ')[0];
                             else if (dateStr.includes(',')) dateStr = dateStr.split(',')[0];
                             
+                            const daysLeft = getWarrantyDays(d.warrantyExpiry);
+                            let warrantyTag = '';
+                            if (daysLeft !== null) {
+                              if (daysLeft >= 0) warrantyTag = ` [Còn BH ${daysLeft} ngày]`;
+                              else warrantyTag = ` [Hết BH]`;
+                            }
+
                             return (
                               <option key={idx} value={idx}>
-                                {d.name} {d.sn && `(SN: ${d.sn})`} - Mua: {dateStr}
+                                {d.name} {d.sn && `(SN: ${d.sn})`} - Mua: {dateStr}{warrantyTag}
                               </option>
                             );
                           })}
                         </select>
 
                         {deviceWarrantyStatus && (
-                          <div className="mt-3 p-3 rounded-lg text-xs font-semibold flex flex-col gap-2 border bg-emerald-50 text-emerald-600 border-emerald-200">
+                          <div className={`mt-3 p-3 rounded-xl text-xs font-bold flex items-center justify-between border shadow-sm animate-in slide-in-from-top-2 duration-300 ${
+                            deviceWarrantyStatus.isExpired 
+                            ? 'bg-rose-50 text-rose-600 border-rose-200' 
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}
+                          >
                             <div className="flex items-center gap-2">
-                              {deviceWarrantyStatus.isExpired ? <AlertCircle size={16} className="text-red-500 shrink-0" /> : <CheckCircle size={16} className="text-emerald-500 shrink-0" />}
-                              <span className={deviceWarrantyStatus.isExpired ? 'text-red-600' : ''}>{deviceWarrantyStatus.text}</span>
+                              {deviceWarrantyStatus.isExpired 
+                                ? <AlertCircle size={16} className="text-rose-500 shrink-0" /> 
+                                : <CheckCircle size={16} className="text-emerald-500 shrink-0" />
+                              }
+                              <span>{deviceWarrantyStatus.text}</span>
                             </div>
+                            {!deviceWarrantyStatus.isExpired && (
+                              <span className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[9px] uppercase tracking-wider">Active</span>
+                            )}
+                            {deviceWarrantyStatus.isExpired && (
+                              <span className="bg-rose-600 text-white px-2 py-0.5 rounded text-[9px] uppercase tracking-wider">Expired</span>
+                            )}
                           </div>
                         )}
                         
@@ -961,10 +1003,11 @@ export const Maintenance: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[9px] font-semibold text-slate-400 tracking-wider ml-1">Dự kiến chi phí (đ)</label>
-                  <input 
-                    type="text" 
+                  <NumericFormat 
                     value={cost}
-                    onChange={(e) => setCost(formatNumber(parseFormattedNumber(e.target.value)))}
+                    onValueChange={(values) => setCost(values.formattedValue)}
+                    thousandSeparator="."
+                    decimalSeparator=","
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none mt-1 shadow-inner focus:border-blue-400" 
                     placeholder="0" 
                   />
@@ -985,7 +1028,7 @@ export const Maintenance: React.FC = () => {
               )}
             </div>
             
-            {selectedCustomerObj && (
+             {selectedCustomerObj && (
               <div className="p-6 border-t border-slate-100 shrink-0">
                 <button 
                   onClick={handleSave}
@@ -1001,8 +1044,8 @@ export const Maintenance: React.FC = () => {
 
       {/* Record Detail Modal */}
       {selectedRecord && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-md max-h-[90vh] flex flex-col rounded-xl shadow-2xl animate-in fade-in zoom-in duration-200 overflow-hidden">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center md:p-4 p-0 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white w-full h-full md:h-auto md:max-h-[90vh] max-w-md md:max-w-4xl flex flex-col rounded-none md:rounded-xl shadow-2xl animate-in fade-in zoom-in duration-200 overflow-hidden">
             <div className="flex justify-between items-center p-6 border-b border-slate-100 shrink-0">
               <h3 className="text-lg font-bold text-slate-800 tracking-tight">Chi tiết phiếu {selectedRecord.id}</h3>
               <div className="flex gap-2">
@@ -1037,239 +1080,270 @@ export const Maintenance: React.FC = () => {
               </div>
             </div>
             
-            <div className={`p-6 overflow-y-auto flex-1 no-scrollbar ${isEditingRecord ? 'space-y-4' : 'space-y-6'}`}>
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center shrink-0">
-                  <User size={24} />
-                </div>
-                <div className="flex-1">
-                  {!isEditingRecord ? (
-                    <>
-                      <p className="font-semibold text-slate-800 tracking-tight">{selectedRecord.customerName}</p>
-                      <p className="text-xs text-slate-500 font-medium">{selectedRecord.customerPhone}</p>
-                    </>
-                  ) : (
-                    <div className="space-y-2">
-                      <input type="text" className="w-full text-sm p-2 border border-slate-200 rounded focus:border-blue-400 outline-none" value={editRecordData.customerName || ''} onChange={e => setEditRecordData({...editRecordData, customerName: e.target.value})} placeholder="Tên KH" />
-                      <input type="text" className="w-full text-sm p-2 border border-slate-200 rounded focus:border-blue-400 outline-none" value={editRecordData.customerPhone || ''} onChange={e => setEditRecordData({...editRecordData, customerPhone: e.target.value})} placeholder="SĐT KH" />
+            <div className={`p-6 overflow-y-auto flex-1 no-scrollbar`}>
+              {isEditingRecord ? (
+                /* Editing Layout */
+                <div className="space-y-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center shrink-0">
+                      <User size={24} />
                     </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-start gap-3">
-                  <Tag className="text-slate-400 mt-0.5 shrink-0" size={16} />
-                  <div className="flex-1">
-                    <p className="text-[10px] font-bold text-slate-400 tracking-wider">Thiết bị</p>
-                    {!isEditingRecord ? (
-                      <>
-                        <p className="text-sm font-semibold text-slate-800">{selectedRecord.productName}</p>
-                        {selectedRecord.serialNumber && <p className="text-xs text-orange-500 font-semibold font-mono">SN: {selectedRecord.serialNumber}</p>}
-                      </>
-                    ) : (
-                      <div className="space-y-2 mt-1">
-                        <input type="text" className="w-full text-sm p-2 border border-slate-200 rounded focus:border-blue-400 outline-none" value={editRecordData.productName || ''} onChange={e => setEditRecordData({...editRecordData, productName: e.target.value})} placeholder="Tên thiết bị" />
-                        <input type="text" className="w-full text-sm p-2 border border-slate-200 rounded focus:border-blue-400 outline-none font-mono" value={editRecordData.serialNumber || ''} onChange={e => setEditRecordData({...editRecordData, serialNumber: e.target.value})} placeholder="Serial Number (không bắt buộc)" />
+                    <div className="flex-1">
+                      <div className="space-y-2">
+                        <input type="text" className="w-full text-sm p-2 border border-slate-200 rounded focus:border-blue-400 outline-none" value={editRecordData.customerName || ''} onChange={e => setEditRecordData({...editRecordData, customerName: e.target.value})} placeholder="Tên KH" />
+                        <input type="text" className="w-full text-sm p-2 border border-slate-200 rounded focus:border-blue-400 outline-none" value={editRecordData.customerPhone || ''} onChange={e => setEditRecordData({...editRecordData, customerPhone: e.target.value})} placeholder="SĐT KH" />
                       </div>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="text-slate-400 mt-0.5 shrink-0" size={16} />
-                  <div className="flex-1">
-                    <p className="text-[10px] font-bold text-slate-400 tracking-wider">Tình trạng lỗi</p>
-                    {!isEditingRecord ? (
-                      <p className="text-sm font-medium text-slate-600">{selectedRecord.issue}</p>
-                    ) : (
-                      <textarea className="w-full text-sm p-2 border border-slate-200 rounded focus:border-blue-400 outline-none resize-none h-16 mt-1" value={editRecordData.issue || ''} onChange={e => setEditRecordData({...editRecordData, issue: e.target.value})} placeholder="Mô tả lỗi" />
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-start gap-3 w-full">
-                  <Clock className="text-slate-400 mt-0.5 shrink-0" size={16} />
-                  <div className="flex-1 w-full">
-                    <p className="text-[10px] font-bold text-slate-400 tracking-wider">Trạng thái hiện tại</p>
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {(['RECEIVING', 'REPAIRING', 'COMPLETED', 'RETURNED'] as const).map(s => (
-                        <button 
-                          key={s}
-                          onClick={() => {
-                            if (selectedRecord.status !== s) {
-                              setStatusConfirmModal({ isOpen: true, newStatus: s, recordId: selectedRecord.id });
-                            }
-                          }}
-                          className={`px-3 py-1.5 rounded-lg text-[8px] font-bold tracking-wide transition-all ${selectedRecord.status === s ? getStatusColor(s) + ' shadow-sm scale-105' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
-                        >
-                          {getStatusText(s)}
-                        </button>
-                      ))}
                     </div>
-                    {['COMPLETED', 'RETURNED'].includes(selectedRecord.status) && (
-                      <div className="mt-3">
-                        <textarea
-                          placeholder="Nhập phản hồi/kết quả sửa chữa..."
-                          className="w-full text-sm p-3 border border-slate-200 rounded-lg outline-none focus:border-blue-400 bg-white"
-                          value={feedbackText}
-                          onChange={(e) => setFeedbackText(e.target.value)}
-                        />
-                        <div className="flex justify-end mt-2">
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex items-start gap-3">
+                      <Tag className="text-slate-400 mt-0.5 shrink-0" size={16} />
+                      <div className="flex-1">
+                        <p className="text-[10px] font-bold text-slate-400 tracking-wider">Thiết bị</p>
+                        <div className="space-y-2 mt-1">
+                          <input type="text" className="w-full text-sm p-2 border border-slate-200 rounded focus:border-blue-400 outline-none" value={editRecordData.productName || ''} onChange={e => setEditRecordData({...editRecordData, productName: e.target.value})} placeholder="Tên thiết bị" />
+                          <input type="text" className="w-full text-sm p-2 border border-slate-200 rounded focus:border-blue-400 outline-none font-mono" value={editRecordData.serialNumber || ''} onChange={e => setEditRecordData({...editRecordData, serialNumber: e.target.value})} placeholder="Serial Number (không bắt buộc)" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="text-slate-400 mt-0.5 shrink-0" size={16} />
+                      <div className="flex-1">
+                        <p className="text-[10px] font-bold text-slate-400 tracking-wider">Tình trạng lỗi</p>
+                        <textarea className="w-full text-sm p-2 border border-slate-200 rounded focus:border-blue-400 outline-none resize-none h-16 mt-1" value={editRecordData.issue || ''} onChange={e => setEditRecordData({...editRecordData, issue: e.target.value})} placeholder="Mô tả lỗi" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* Detail/Grid Layout */
+                <div className="md:grid md:grid-cols-2 md:gap-8 space-y-8 md:space-y-0">
+                  {/* Column 1: Identity & Process Handling */}
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-4 p-4 bg-slate-50 border border-slate-100 rounded-2xl">
+                      <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center shrink-0">
+                        <User size={24} />
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-bold text-slate-800 tracking-tight leading-none mb-1">{selectedRecord.customerName}</p>
+                        <p className="text-xs text-slate-500 font-semibold font-mono">{selectedRecord.customerPhone}</p>
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-4 shadow-sm">
+                      <div className="flex items-start gap-3">
+                        <Tag className="text-amber-500 shrink-0" size={18} />
+                        <div className="flex-1">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Thiết bị</p>
+                          <p className="text-sm font-bold text-slate-800 leading-snug">{selectedRecord.productName}</p>
+                          {selectedRecord.serialNumber && (
+                            <span className="mt-1 inline-block px-1.5 py-0.5 bg-orange-50 text-orange-600 rounded font-mono text-[10px] font-bold border border-orange-100">
+                              SN: {selectedRecord.serialNumber}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-3">
+                        <AlertCircle className="text-rose-500 shrink-0" size={18} />
+                        <div className="flex-1">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tình trạng lỗi</p>
+                          <p className="text-sm font-medium text-slate-600 bg-slate-50/80 p-3 rounded-lg border border-slate-100/50">{selectedRecord.issue}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2 px-1">
+                        <Clock className="text-blue-500" size={18} />
+                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Quy trình xử lý</p>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-2">
+                        {(['RECEIVING', 'REPAIRING', 'COMPLETED', 'RETURNED'] as const).map(s => (
+                          <button 
+                            key={s}
+                            onClick={() => {
+                              if (selectedRecord.status !== s) {
+                                setStatusConfirmModal({ isOpen: true, newStatus: s, recordId: selectedRecord.id });
+                              }
+                            }}
+                            className={`px-3 py-3 rounded-xl text-[10px] font-black tracking-widest uppercase transition-all flex items-center justify-center text-center ${selectedRecord.status === s ? getStatusColor(s) + ' shadow-lg scale-105 ring-2 ring-white z-10' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
+                          >
+                            {getStatusText(s)}
+                          </button>
+                        ))}
+                      </div>
+
+                      {['COMPLETED', 'RETURNED'].includes(selectedRecord.status) && (
+                        <div className="mt-4 space-y-2 animate-in slide-in-from-top-2 duration-300">
+                          <textarea
+                            placeholder="Nhập nội dung sửa chữa, linh kiện thay thế..."
+                            className="w-full text-sm p-4 border border-slate-200 rounded-2xl outline-none focus:border-blue-400 bg-white shadow-inner h-28 transition-all"
+                            value={feedbackText}
+                            onChange={(e) => setFeedbackText(e.target.value)}
+                          />
                           <button 
                             onClick={() => {
                               updateMaintenanceRecord(selectedRecord.id, { feedback: feedbackText });
                               setSelectedRecord({...selectedRecord, feedback: feedbackText});
-                              alert('Đã lưu phản hồi!');
+                              alert('Đã lưu thông tin sửa chữa!');
                             }}
-                            className="px-4 py-1.5 bg-blue-600 text-white rounded text-xs font-bold shadow-sm shadow-blue-200 hover:bg-blue-700 hover:-translate-y-0.5 transition-all"
+                            className="w-full py-3.5 bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-blue-200 hover:bg-blue-700 hover:-translate-y-0.5 transition-all active:scale-95"
                           >
-                            Lưu phản hồi
+                            Lưu thông tin xử lý
                           </button>
                         </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Column 2: Financial, Transfer & Invoice */}
+                  <div className="space-y-6">
+                    <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200 space-y-5 shadow-sm">
+                      <div className="flex flex-col gap-1 w-full relative">
+                        <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-1">Ước tính chi phí (Sửa chữa)</span>
+                        <div className="flex items-center gap-2 relative w-full bg-white px-4 py-3 rounded-2xl border border-slate-200 shadow-inner focus-within:border-blue-400 transition-all">
+                          <input 
+                            type="text"
+                            className="text-xl font-black text-slate-800 bg-transparent outline-none w-full"
+                            value={formatNumber(selectedRecord.cost)}
+                            onChange={(e) => {
+                              const val = parseFormattedNumber(e.target.value) || 0;
+                              updateMaintenanceRecord(selectedRecord.id, { cost: val });
+                              setSelectedRecord({...selectedRecord, cost: val});
+                            }}
+                          />
+                          <span className="text-lg font-black text-slate-400">đ</span>
+                        </div>
                       </div>
+
+                      {selectedRecord.invoiceId ? (() => {
+                        const linkedInvoice = invoices?.find(inv => inv.id === selectedRecord.invoiceId);
+                        return (
+                          <div className="space-y-4">
+                            <div className="flex items-center justify-between text-emerald-800 bg-white border border-emerald-100 px-4 py-3 rounded-2xl shadow-sm">
+                              <div className="flex items-center gap-2">
+                                <CheckCircle size={18} className="text-emerald-500" />
+                                <span className="text-[10px] font-black uppercase tracking-widest">Đã lập hóa đơn</span>
+                              </div>
+                              <span 
+                                className="font-black text-xs tracking-widest cursor-pointer hover:underline text-blue-600"
+                                onClick={() => {
+                                  if (linkedInvoice) {
+                                    setSelectedInvoiceForDetail(linkedInvoice);
+                                  } else {
+                                    navigate(`/invoices?invoiceId=${selectedRecord.invoiceId}`);
+                                  }
+                                }}
+                              >
+                                #{selectedRecord.invoiceId} &rsaquo;
+                              </span>
+                            </div>
+                            {linkedInvoice && (
+                              <div className="bg-white border border-slate-200 p-4 rounded-2xl space-y-2 shadow-sm">
+                                {linkedInvoice.items.map((item, idxx) => (
+                                  <div key={idxx} className="flex justify-between items-center text-[13px]">
+                                    <span className="text-slate-600 font-bold line-clamp-1 flex-1 pr-4">{item.qty}x {item.name}</span>
+                                    <span className="text-slate-900 font-black">{formatNumber(item.price * item.qty)}đ</span>
+                                  </div>
+                                ))}
+                                <div className="flex justify-between items-center pt-3 mt-1 border-t border-dashed border-slate-200">
+                                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Tổng cộng</span>
+                                  <span className="text-base font-black text-blue-600">{formatNumber(linkedInvoice.total)}đ</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })() : (
+                        ['COMPLETED', 'RETURNED'].includes(selectedRecord.status) && (
+                          <div className="animate-in slide-in-from-bottom-2 duration-300">
+                            <button
+                              onClick={() => setIsInvoiceModalOpen(true)}
+                              className="w-full flex items-center justify-center gap-3 py-4 bg-blue-600 text-white font-black uppercase tracking-widest rounded-2xl text-[11px] hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 active:scale-95"
+                            >
+                              <Plus size={18} /> Lập Đơn Xuất Bán
+                            </button>
+                          </div>
+                        )
+                      )}
+                    </div>
+
+                    {selectedRecord.transferId && maintenanceTransfers?.find(t => t.id === selectedRecord.transferId) ? (() => {
+                      const trf = maintenanceTransfers.find(t => t.id === selectedRecord.transferId)!;
+                      return (
+                        <div className="bg-gradient-to-br from-violet-50 to-white p-5 rounded-3xl border border-violet-100 shadow-sm space-y-4 relative overflow-hidden">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-[10px] font-black text-violet-600 uppercase tracking-widest">Chuyển Tuyến Bảo Hành</span>
+                            <span className="text-[9px] bg-violet-600 text-white px-2 py-1 rounded-full font-black uppercase tracking-widest">{trf.status}</span>
+                          </div>
+                          <div className="space-y-3">
+                             <p className="text-slate-800"><span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter block mb-0.5">Đối tác nhận</span> <span className="font-black text-base">{trf.supplierName || '---'}</span></p>
+                             <div className="grid grid-cols-2 gap-4">
+                               <p><span className="text-[10px] font-bold text-slate-400 uppercase block mb-0.5">Ngày đi</span> <span className="font-bold text-slate-700">{toDMY(trf.transferDate)}</span></p>
+                               <p><span className="text-[10px] font-bold text-slate-400 uppercase block mb-0.5">Hẹn về</span> <span className="font-bold text-slate-700">{toDMY(trf.returnDate)}</span></p>
+                             </div>
+                             {(trf.repairCost > 0 || trf.shippingCost > 0) && (
+                               <div className="flex gap-4 pt-1 border-t border-violet-100/50">
+                                 {trf.repairCost > 0 && <span><span className="text-[9px] font-bold text-slate-400 uppercase block mb-0.5">Phí sửa</span> <span className="text-orange-600 font-black">{formatNumber(trf.repairCost)}đ</span></span>}
+                                 {trf.shippingCost > 0 && <span><span className="text-[9px] font-bold text-slate-400 uppercase block mb-0.5">Phí ship</span> <span className="text-blue-600 font-black">{formatNumber(trf.shippingCost)}đ</span></span>}
+                               </div>
+                             )}
+                          </div>
+                          <button 
+                            onClick={() => {
+                              setTransferDest(trf.supplierName || '');
+                              setTransferAccessories(trf.accessories || '');
+                              setTransferActionStatus(trf.status as any || 'Đóng hàng');
+                              setTransferCost(trf.repairCost ? formatNumber(trf.repairCost) : '');
+                              setTransferShippingCost(trf.shippingCost ? formatNumber(trf.shippingCost) : '');
+                              setTransferDate(toYMD(trf.transferDate) || '');
+                              setTransferReturnDate(toYMD(trf.returnDate) || '');
+                              setTransferNote(trf.note || '');
+                              setIsTransferModalOpen(true);
+                            }}
+                            className="w-full py-3 bg-white text-violet-700 font-black uppercase tracking-widest rounded-xl text-[10px] flex items-center justify-center gap-2 hover:bg-violet-50 transition-all border border-violet-200 shadow-sm"
+                          >
+                            Cập nhật chuyển tuyến
+                          </button>
+                        </div>
+                      );
+                    })() : (
+                      selectedRecord.status === 'REPAIRING' && (
+                        <button 
+                          onClick={() => {
+                            setTransferDest('');
+                            setTransferAccessories('');
+                            setTransferActionStatus('Đóng hàng');
+                            setTransferCost('');
+                            setTransferShippingCost('');
+                            setTransferDate('');
+                            setTransferReturnDate('');
+                            setTransferNote('');
+                            setIsTransferModalOpen(true);
+                          }}
+                          className="w-full py-4 bg-violet-50 text-violet-700 font-black uppercase tracking-widest rounded-2xl text-[11px] flex items-center justify-center gap-3 hover:bg-violet-100 transition-all border border-violet-200 border-dashed animate-in slide-in-from-bottom-2 duration-300"
+                        >
+                          <ArrowLeftRight size={18} />
+                          Chuyển Tuyến Xử Lý
+                        </button>
+                      )
                     )}
                   </div>
                 </div>
-              </div>
-
-              {selectedRecord.transferId && maintenanceTransfers?.find(t => t.id === selectedRecord.transferId) && (() => {
-                const trf = maintenanceTransfers.find(t => t.id === selectedRecord.transferId)!;
-                return (
-                  <div className="bg-violet-50 p-4 rounded-xl border border-violet-100 space-y-2 relative">
-                    <div className="absolute top-3 right-3">
-                      <span className="text-[10px] bg-violet-200 text-violet-800 px-2 py-0.5 rounded font-bold uppercase tracking-wide">
-                        {trf.status === 'TRANSFERRED' ? 'Đã chuyển tuyến' : trf.status}
-                      </span>
-                    </div>
-                    <div className="flex items-start gap-4">
-                       <ArrowLeftRight className="text-violet-500 mt-1" size={18} />
-                       <div className="flex-1 text-sm space-y-1">
-                          <p><span className="font-bold text-slate-500">Nơi nhận:</span> <span className="font-semibold text-slate-800">{trf.supplierName || '---'}</span></p>
-                          <p><span className="font-bold text-slate-500">Ngày đi:</span> <span className="text-slate-700">{toDMY(trf.transferDate)}</span></p>
-                          <p><span className="font-bold text-slate-500">Ngày về:</span> <span className="text-slate-700">{toDMY(trf.returnDate)}</span></p>
-                          {(trf.repairCost > 0 || trf.shippingCost > 0) && (
-                            <p className="flex items-center gap-3">
-                              {trf.repairCost > 0 && <span><span className="font-bold text-slate-500">Sửa:</span> <span className="text-orange-600 font-bold">{formatNumber(trf.repairCost)}đ</span></span>}
-                              {trf.shippingCost > 0 && <span><span className="font-bold text-slate-500">Ship:</span> <span className="text-blue-600 font-bold">{formatNumber(trf.shippingCost)}đ</span></span>}
-                            </p>
-                          )}
-                          {trf.note && (
-                            <p><span className="font-bold text-slate-500">Ghi chú:</span> <span className="text-slate-700">{trf.note}</span></p>
-                          )}
-                       </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-2 mt-2 pt-3 border-t border-violet-100/60">
-                      <button 
-                        onClick={() => {
-                          setTransferDest(trf.supplierName || '');
-                          setTransferAccessories(trf.accessories || '');
-                          setTransferActionStatus(trf.status as any || 'Đóng hàng');
-                          setTransferCost(trf.repairCost ? formatNumber(trf.repairCost) : '');
-                          setTransferShippingCost(trf.shippingCost ? formatNumber(trf.shippingCost) : '');
-                          setTransferDate(toYMD(trf.transferDate) || '');
-                          setTransferReturnDate(toYMD(trf.returnDate) || '');
-                          setTransferNote(trf.note || '');
-                          setIsTransferModalOpen(true);
-                        }}
-                        className="flex-1 py-2 bg-white text-violet-700 font-bold rounded text-[12px] flex items-center justify-center gap-2 hover:bg-violet-100 transition-colors border border-violet-200"
-                      >
-                        <ArrowLeftRight size={14} />
-                        Cập nhật Chuyển Tuyến
-                      </button>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {!selectedRecord.transferId && (
-                <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-100">
-                  <button 
-                    onClick={() => {
-                      setTransferDest('');
-                      setTransferAccessories('');
-                      setTransferActionStatus('Đóng hàng');
-                      setTransferCost('');
-                      setTransferShippingCost('');
-                      setTransferDate('');
-                      setTransferReturnDate('');
-                      setTransferNote('');
-                      setIsTransferModalOpen(true);
-                    }}
-                    className="flex-1 py-2.5 bg-violet-50 text-violet-700 font-bold rounded-lg text-[13px] flex items-center justify-center gap-2 hover:bg-violet-100 transition-colors border border-violet-100"
-                  >
-                    <ArrowLeftRight size={14} />
-                    Chuyển Tuyến
-                  </button>
-                </div>
               )}
-
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <div className="flex flex-col gap-1 w-full">
-                  <span className="text-[10px] font-bold text-slate-500 tracking-wider">Chi phí dự kiến</span>
-                  <div className="flex items-center gap-2 relative w-full">
-                    <input 
-                      type="text"
-                      className="text-lg font-semibold text-slate-800 bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 outline-none w-full pb-1 pr-6"
-                      value={formatNumber(selectedRecord.cost)}
-                      onChange={(e) => {
-                        const val = parseFormattedNumber(e.target.value) || 0;
-                        updateMaintenanceRecord(selectedRecord.id, { cost: val });
-                        setSelectedRecord({...selectedRecord, cost: val});
-                      }}
-                    />
-                    <span className="text-lg font-semibold text-slate-800 absolute right-1 bottom-1.5 pointer-events-none">đ</span>
-                  </div>
-                </div>
-
-                <div className="mt-4 pt-4 border-t border-slate-200">
-                  {selectedRecord.invoiceId ? (() => {
-                    const linkedInvoice = invoices?.find(inv => inv.id === selectedRecord.invoiceId);
-                    return (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-emerald-700 bg-emerald-50 px-2 py-1 rounded">
-                          <div className="flex items-center gap-1.5">
-                            <CheckCircle size={14} />
-                            <span className="text-xs font-semibold">Đã tạo đơn:</span>
-                          </div>
-                          <span 
-                            className="font-bold text-xs tracking-wide cursor-pointer hover:underline text-blue-600"
-                            onClick={() => {
-                              window.location.href = '/invoices'; // Tạm thời link sang tab Hóa đơn vì Maintenance ko mang theo Invoices Detail View Modal
-                            }}
-                          >
-                            {selectedRecord.invoiceId} &rarr;
-                          </span>
-                        </div>
-                        {linkedInvoice && (
-                          <div className="bg-white border border-slate-200 p-2 rounded-lg space-y-1">
-                            {linkedInvoice.items.map((item, idxx) => (
-                              <div key={idxx} className="flex justify-between items-center text-xs">
-                                <span className="text-slate-700 font-medium line-clamp-1 flex-1 pr-2">{item.qty}x {item.name}</span>
-                                <span className="text-slate-800 font-bold">{formatNumber(item.price * item.qty)}đ</span>
-                              </div>
-                            ))}
-                            <div className="flex justify-between items-center pt-1 mt-1 border-t border-dashed border-slate-200">
-                              <span className="text-[10px] font-bold text-slate-500 uppercase">Tổng H.Đơn</span>
-                              <span className="text-sm font-bold text-blue-600">{formatNumber(linkedInvoice.total)}đ</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })() : (
-                    <button
-                      onClick={() => setIsInvoiceModalOpen(true)}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 bg-blue-100 text-blue-700 font-bold rounded-lg text-sm hover:bg-blue-200 transition-colors"
-                    >
-                      <Plus size={16} /> Tạo đơn xuất bán
-                    </button>
-                  )}
-                </div>
-              </div>
             </div>
             
-            <div className="p-6 border-t border-slate-100 bg-slate-50/50 shrink-0">
-              <button onClick={() => setSelectedRecord(null)} className="w-full py-3 bg-slate-900 text-white font-semibold rounded-lg text-[10px] tracking-wide">Đóng chi tiết</button>
+            <div className="p-4 md:p-6 border-t border-slate-100 bg-slate-50/50 shrink-0">
+              <button 
+                onClick={() => {
+                  setSelectedRecord(null);
+                  setIsEditingRecord(false);
+                }}
+                className="w-full py-3 bg-[#991b1b] text-white font-black rounded-lg uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors shadow-lg shadow-red-100"
+              >
+                Đóng
+              </button>
             </div>
           </div>
         </div>
@@ -1739,8 +1813,8 @@ export const Maintenance: React.FC = () => {
                 </div>
                 {invoiceSearchTerm.trim() && (
                   <div className="absolute top-full left-0 right-0 z-50 bg-white border border-slate-200 shadow-lg rounded-lg mt-1 max-h-40 flex flex-col overflow-y-auto">
-                    {products?.filter(p => p.name.toLowerCase().includes(invoiceSearchTerm.toLowerCase())).length > 0 ? (
-                      products.filter(p => p.name.toLowerCase().includes(invoiceSearchTerm.toLowerCase())).slice(0, 20).map(p => (
+                    {products?.filter(p => p.name.toLowerCase().includes(invoiceSearchTerm.toLowerCase()) || p.id.toLowerCase().includes(invoiceSearchTerm.toLowerCase())).length > 0 ? (
+                      products.filter(p => p.name.toLowerCase().includes(invoiceSearchTerm.toLowerCase()) || p.id.toLowerCase().includes(invoiceSearchTerm.toLowerCase())).slice(0, 30).map(p => (
                         <div 
                           key={p.id}
                           className="p-2 border-b border-slate-50 hover:bg-slate-50 cursor-pointer flex justify-between items-center"
@@ -1748,7 +1822,10 @@ export const Maintenance: React.FC = () => {
                             addInvoiceItem(p);
                           }}
                         >
-                          <span className="text-sm font-semibold">{p.name}</span>
+                          <div className="flex flex-col">
+                            <span className="text-sm font-semibold">{p.name}</span>
+                            <span className="text-[10px] text-slate-400">Mã: {p.id} | Tồn: {p.stock}</span>
+                          </div>
                           <span className="text-xs text-blue-600 font-bold">{formatNumber(p.price)}đ</span>
                         </div>
                       ))
@@ -1756,7 +1833,7 @@ export const Maintenance: React.FC = () => {
                       <div 
                         className="p-3 text-center text-xs text-blue-600 font-medium cursor-pointer hover:bg-slate-50"
                         onClick={() => {
-                          setInvoiceItems(prev => [...prev, { id: 'SP_KHAC', name: invoiceSearchTerm, price: 0, qty: 1 }]);
+                          setInvoiceItems(prev => [...prev, { id: 'SP_KHAC', name: invoiceSearchTerm, price: 0, qty: 1, importPriceTotal: 0 }]);
                           setInvoiceSearchTerm('');
                         }}
                       >
@@ -1825,13 +1902,11 @@ export const Maintenance: React.FC = () => {
                         >+</button>
                       </div>
                       <div className="w-24">
-                        <input 
-                          type="text" 
-                          value={formatNumber(item.price)} 
-                          onChange={e => {
-                            const val = parseFormattedNumber(e.target.value) || 0;
-                            setInvoiceItems(prev => prev.map((vi, i) => i === idx ? {...vi, price: val} : vi));
-                          }}
+                        <NumericFormat 
+                          value={item.price} 
+                          onValueChange={(values) => setInvoiceItems(prev => prev.map((vi, i) => i === idx ? {...vi, price: values.floatValue || 0} : vi))}
+                          thousandSeparator="."
+                          decimalSeparator=","
                           className="w-full text-right text-sm font-bold text-blue-600 bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 outline-none pb-0.5"
                         />
                       </div>
@@ -1842,9 +1917,30 @@ export const Maintenance: React.FC = () => {
                   ))}
                   
                   <div className="flex justify-between items-center px-2 pt-2 border-t border-slate-200 mt-2">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Tổng tiền</span>
-                    <span className="text-lg font-bold text-slate-800">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Tiền hàng</span>
+                    <span className="text-sm font-bold text-slate-800">
                       {formatNumber(invoiceItems.reduce((acc, item) => acc + item.price * item.qty, 0))}đ
+                    </span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center px-2 py-1">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Giảm giá</span>
+                    <div className="relative flex items-center">
+                      <NumericFormat 
+                        value={invoiceDiscount}
+                        onValueChange={(values) => setInvoiceDiscount(values.floatValue || 0)}
+                        thousandSeparator="."
+                        decimalSeparator=","
+                        className="w-24 text-right bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 outline-none text-sm font-bold text-red-500 pb-0.5"
+                      />
+                      <span className="text-xs font-bold text-red-500 ml-1">đ</span>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center px-2 py-1 bg-blue-50 rounded">
+                    <span className="text-xs font-bold text-blue-600 uppercase tracking-widest">Tổng thanh toán</span>
+                    <span className="text-lg font-bold text-blue-700">
+                      {formatNumber(Math.max(0, invoiceItems.reduce((acc, item) => acc + item.price * item.qty, 0) - invoiceDiscount))}đ
                     </span>
                   </div>
                 </div>
@@ -1854,17 +1950,18 @@ export const Maintenance: React.FC = () => {
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-1">Khách thanh toán (đ)</label>
                 <div className="relative">
-                  <input
-                    type="text"
+                  <NumericFormat
                     value={invoicePaid}
-                    onChange={(e) => setInvoicePaid(formatNumber(parseFormattedNumber(e.target.value) || 0))}
+                    onValueChange={(values) => setInvoicePaid(values.formattedValue)}
+                    thousandSeparator="."
+                    decimalSeparator=","
                     className="w-full p-3 bg-white border border-slate-200 rounded-lg text-lg font-bold outline-none focus:border-blue-400 text-right pr-8"
                     placeholder="0"
                   />
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 font-bold text-slate-500">đ</span>
                 </div>
                 <div className="flex justify-end gap-2 mt-2">
-                  <button onClick={() => setInvoicePaid(formatNumber(invoiceItems.reduce((acc, item) => acc + item.price * item.qty, 0)))} className="px-2 py-1 bg-slate-100 border border-slate-200 text-slate-600 rounded text-xs font-semibold hover:bg-slate-200">Ghi nhận nhanh: Thanh toán đủ</button>
+                  <button onClick={() => setInvoicePaid(formatNumber(Math.max(0, invoiceItems.reduce((acc, item) => acc + item.price * item.qty, 0) - invoiceDiscount)))} className="px-2 py-1 bg-slate-100 border border-slate-200 text-slate-600 rounded text-xs font-semibold hover:bg-slate-200">Ghi nhận nhanh: Thanh toán đủ</button>
                 </div>
               </div>
             </div>
@@ -1878,7 +1975,8 @@ export const Maintenance: React.FC = () => {
                     return;
                   }
                   
-                  const invoiceTotal = invoiceItems.reduce((acc, item) => acc + item.price * item.qty, 0);
+                  const invoiceTotalRaw = invoiceItems.reduce((acc, item) => acc + item.price * item.qty, 0);
+                  const invoiceTotal = Math.max(0, invoiceTotalRaw - invoiceDiscount);
                   const paidVal = parseFormattedNumber(invoicePaid) || 0;
                   const newId = generateId('HD', invoices || []);
 
@@ -1889,12 +1987,14 @@ export const Maintenance: React.FC = () => {
                     phone: selectedRecord?.customerPhone || '',
                     total: invoiceTotal,
                     paid: paidVal,
-                    debt: invoiceTotal - paidVal,
-                    items: invoiceItems.map(i => ({...i, sn: i.serials?.join(', ') || undefined, importPriceTotal: 0})),
+                    debt: Math.max(0, invoiceTotal - paidVal),
+                    discount: invoiceDiscount,
+                    items: invoiceItems.map(i => ({...i, sn: i.serials?.join(', ') || undefined, importPriceTotal: i.importPriceTotal * i.qty})),
                     paymentMethod: 'CASH',
                     note: `Thanh toán sửa chữa phiếu ${selectedRecord?.id}`
                   };
 
+                  // addInvoice will handle stock deduction automatically
                   await addInvoice(newInvoice as any);
                   await updateMaintenanceRecord(selectedRecord!.id, { invoiceId: newId });
                   setSelectedRecord({ ...selectedRecord!, invoiceId: newId });
@@ -1904,11 +2004,8 @@ export const Maintenance: React.FC = () => {
                   setInvoicePaid('');
                   setInvoiceSearchTerm('');
                   
-                  // Optional alert to guide user
-                  const wantToSwitch = window.confirm(`Đã tạo Hóa đơn (ID: ${newId}). Bạn có muốn chuyển qua Trang Hóa đơn để xem chi tiết / in không?`);
-                  if (wantToSwitch) {
-                    window.location.href = '/invoices';
-                  }
+                  // Optional: Redirect to invoice page without confirm
+                  // navigate(`/invoices?id=${newId}`);
                 }}
                 className="flex-[2] py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 shadow shadow-blue-200"
                >
@@ -1922,27 +2019,68 @@ export const Maintenance: React.FC = () => {
       {/* Serial Selection Modal */}
       {isSerialModalOpen && activeSerialProduct && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm print:hidden">
-          <div className="bg-white w-full max-w-md rounded-xl shadow-2xl overflow-hidden">
+          <div className="bg-white w-full max-w-md rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="flex justify-between items-center p-6 border-b border-slate-100">
               <h3 className="text-lg font-bold text-slate-800 tracking-tighter">Chọn IMEI/Serial</h3>
-              <button onClick={() => setIsSerialModalOpen(false)} className="w-8 h-8 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-200 flex items-center justify-center">
+              <button onClick={() => setIsSerialModalOpen(false)} className="w-8 h-8 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-200 flex items-center justify-center transition-colors">
                 <X size={18} />
               </button>
             </div>
             <div className="p-6">
               <div className="flex items-center gap-3 mb-6 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                <div className="w-10 h-10 bg-white rounded-lg border border-slate-200 flex items-center justify-center shadow-sm">
-                  <Tag size={20} className="text-slate-400" />
+                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
+                  <Tag size={20} className="text-blue-600" />
                 </div>
-                <div>
-                  <p className="font-bold text-slate-800 line-clamp-1">{activeSerialProduct.name}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">Mã: SP{activeSerialProduct.id}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-slate-800 truncate">{activeSerialProduct.name}</p>
+                  <p className="text-[10px] text-slate-400 font-mono">ID: {activeSerialProduct.id}</p>
+                </div>
+              </div>
+
+              {/* Manual Entry or Filter */}
+              <div className="mb-4">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 block mb-1">Tìm hoặc nhập Serial mới</label>
+                <div className="flex gap-2">
+                  <div className="flex-1 relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                    <input 
+                      type="text" 
+                      id="manual-serial-input"
+                      placeholder="Nhập Serial..."
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium outline-none focus:border-blue-400 transition-all font-mono"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const val = (e.currentTarget as HTMLInputElement).value.trim();
+                          if (val) {
+                            addInvoiceItem(activeSerialProduct, val);
+                            setIsSerialModalOpen(false);
+                          }
+                        }
+                      }}
+                    />
+                  </div>
+                  <button 
+                    onClick={() => {
+                      const input = document.getElementById('manual-serial-input') as HTMLInputElement;
+                      const val = input?.value.trim();
+                      if (val) {
+                        addInvoiceItem(activeSerialProduct, val);
+                        setIsSerialModalOpen(false);
+                      } else {
+                        alert('Vui lòng nhập Serial!');
+                      }
+                    }}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition-all"
+                  >
+                    Thêm
+                  </button>
                 </div>
               </div>
               
-              <div className="space-y-2 max-h-60 overflow-y-auto no-scrollbar pr-2 mb-4">
-                {serials?.filter(s => s.prodId === activeSerialProduct.id && s.status === 'IN_STOCK').length > 0 ? (
-                  serials.filter(s => s.prodId === activeSerialProduct.id && s.status === 'IN_STOCK').map(s => {
+              <div className="space-y-2 max-h-60 overflow-y-auto no-scrollbar pr-2 mb-4 mt-2 border-t border-slate-50 pt-4">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2">Danh sách Serial trong kho</p>
+                {serials?.filter(s => s.prodId === activeSerialProduct.id && s.status !== 'SOLD').length > 0 ? (
+                  serials.filter(s => s.prodId === activeSerialProduct.id && s.status !== 'SOLD').map(s => {
                     const isSelected = invoiceItems.find(i => i.id === activeSerialProduct.id)?.serials?.includes(s.sn) || false;
                     return (
                       <div 
@@ -1963,19 +2101,192 @@ export const Maintenance: React.FC = () => {
                     );
                   })
                 ) : (
-                  <div className="text-center py-8">
-                    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3">
-                      <ShoppingBag size={24} className="text-slate-300" />
+                  <div className="text-center py-6">
+                    <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-2">
+                      <ShoppingBag size={20} className="text-slate-300" />
                     </div>
-                    <p className="text-slate-500 text-sm font-medium">Không có Serial nào sẵn sàng xuất bán</p>
+                    <p className="text-slate-400 text-[11px] font-medium">Không có Serial nào sẵn sàng trong kho</p>
                   </div>
                 )}
               </div>
-              <button onClick={() => setIsSerialModalOpen(false)} className="w-full py-3 bg-slate-900 text-white font-semibold rounded-lg text-sm tracking-wide shadow-md shadow-slate-200">Xong</button>
+              <div className="flex gap-2">
+                <button onClick={() => setIsSerialModalOpen(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-lg text-xs tracking-wide transition-all hover:bg-slate-200">Bỏ qua</button>
+              </div>
             </div>
           </div>
         </div>
       )}
+      {/* Nested Invoice Detail Modal (Opens over Maintenance Detail) */}
+      {selectedInvoiceForDetail && (() => {
+        const matchingCustomer = customers.find(c => c.name === selectedInvoiceForDetail.customer || (selectedInvoiceForDetail.phone && c.phone === selectedInvoiceForDetail.phone));
+        const displayPhone = selectedInvoiceForDetail.phone || matchingCustomer?.phone;
+        const displayAddress = matchingCustomer?.address;
+        const dateOfThisInvoice = new Date(selectedInvoiceForDetail.date);
+        const customerInvoices = invoices.filter(i => 
+          i.customer === selectedInvoiceForDetail.customer && 
+          (new Date(i.date) < dateOfThisInvoice || (i.date === selectedInvoiceForDetail.date && i.id < selectedInvoiceForDetail.id))
+        );
+        const customerReturns = (returnSalesOrders || []).filter(r => 
+          r.customer === selectedInvoiceForDetail.customer && 
+          new Date(r.date) < dateOfThisInvoice
+        );
+        const calculatedOldDebt = customerInvoices.reduce((sum, i) => sum + i.debt, 0) - 
+                        customerReturns.reduce((sum, r) => sum + (r.total - r.paid), 0);
+        const oldDebt = selectedInvoiceForDetail.oldDebt !== undefined ? selectedInvoiceForDetail.oldDebt : calculatedOldDebt;
+
+        return (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+            <div className="bg-white w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+              <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg">
+                    <FileText size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-800 tracking-tighter">Chi tiết hóa đơn</h3>
+                    <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest">Mã: {selectedInvoiceForDetail.id}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setSelectedInvoiceForDetail(null)} className="w-8 h-8 bg-white text-slate-400 rounded-full hover:bg-slate-200 transition-colors flex items-center justify-center shadow-sm border border-slate-100">
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-6 overflow-y-auto flex-1 space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 flex items-center gap-3">
+                    <Calendar className="text-slate-400 shrink-0" size={18} />
+                    <div>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Ngày lập phiếu</p>
+                      <p className="text-xs font-bold text-slate-800">{selectedInvoiceForDetail.date}</p>
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 flex flex-col gap-1">
+                    <div className="flex items-center gap-3">
+                      <User className="text-slate-400 shrink-0" size={18} />
+                      <div className="flex-1">
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Khách hàng</p>
+                        <p className="text-xs font-bold text-slate-800">{selectedInvoiceForDetail.customer}</p>
+                      </div>
+                    </div>
+                    {(displayPhone || displayAddress) && (
+                      <div className="mt-2 pt-2 border-t border-slate-200/60 pl-8 space-y-1">
+                        {displayPhone && (
+                          <p className="text-xs text-slate-600 font-medium">
+                            <span className="text-slate-400 mr-1">ĐT:</span> {displayPhone}
+                          </p>
+                        )}
+                        {displayAddress && (
+                          <p className="text-xs text-slate-600 font-medium whitespace-pre-wrap">
+                            <span className="text-slate-400 mr-1">Đ/C:</span> {displayAddress}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="border border-slate-100 rounded-lg overflow-hidden">
+                  <div className="bg-slate-50 px-4 py-2 border-b border-slate-100 flex items-center gap-2">
+                    <Package className="text-slate-400" size={14} />
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Danh sách mặt hàng</span>
+                  </div>
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-50">
+                        <th className="px-4 py-3 text-[9px] font-bold text-slate-400 uppercase">Sản phẩm</th>
+                        <th className="px-4 py-3 text-[9px] font-bold text-slate-400 uppercase text-center">SL</th>
+                        <th className="px-4 py-3 text-[9px] font-bold text-slate-400 uppercase text-right">Đơn giá</th>
+                        <th className="px-4 py-3 text-[9px] font-bold text-slate-400 uppercase text-right">Thành tiền</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {selectedInvoiceForDetail.items.map((item, idx) => (
+                        <tr key={idx}>
+                          <td className="px-4 py-3">
+                            <p className="text-xs font-bold text-slate-800 tracking-tighter">{item.name}</p>
+                            <div className="flex flex-wrap gap-2 mt-1">
+                              {item.sn && (
+                                <div className="flex flex-wrap gap-1">
+                                  {(Array.isArray(item.sn) ? item.sn : item.sn.split(',')).map((sn: string, sIdx: number) => (
+                                    <span key={sIdx} className="text-[13px] bg-orange-50 text-orange-600 px-2 py-0.5 rounded font-mono font-bold border border-orange-100 uppercase">
+                                      {sn.trim()}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center text-xs font-bold text-slate-600">{item.qty}</td>
+                          <td className="px-4 py-3 text-right text-xs font-bold text-slate-600">{formatNumber(item.price)}đ</td>
+                          <td className="px-4 py-3 text-right text-xs font-bold text-slate-800">{formatNumber(item.qty * item.price)}đ</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="bg-blue-50/50 p-6 rounded-xl border border-blue-100 space-y-3">
+                  <div className="flex justify-between items-center text-slate-600">
+                    <span className="text-xs font-bold uppercase tracking-widest">Tổng tiền hàng</span>
+                    <span className="text-sm font-bold">{formatNumber(selectedInvoiceForDetail.total + (selectedInvoiceForDetail.discount || 0))}đ</span>
+                  </div>
+                  <div className="flex justify-between items-center text-red-500">
+                    <span className="text-xs font-bold uppercase tracking-widest">Giảm giá</span>
+                    <span className="text-sm font-bold">-{formatNumber(selectedInvoiceForDetail.discount || 0)}đ</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-3 border-t border-blue-200">
+                    <div className="flex items-center gap-2">
+                      <CreditCard className="text-blue-600" size={18} />
+                      <span className="text-sm font-bold text-blue-800 uppercase tracking-widest">Tổng thanh toán</span>
+                    </div>
+                    <span className="text-2xl font-bold text-blue-600 tracking-tighter">{formatNumber(selectedInvoiceForDetail.total)}đ</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-4 border-t border-blue-200">
+                    <div className="bg-slate-50/50 p-3 rounded-xl border border-slate-200 flex justify-between items-center">
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Nợ cũ</p>
+                      <p className="text-sm font-bold text-slate-700">{formatNumber(oldDebt || 0)}đ</p>
+                    </div>
+                    <div className="bg-emerald-50/50 p-3 rounded-xl border border-emerald-100 flex justify-between items-center">
+                      <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Đã thanh toán</p>
+                      <p className="text-sm font-bold text-emerald-700">{formatNumber(selectedInvoiceForDetail.paid)}đ</p>
+                    </div>
+                    <div className="bg-red-50/50 p-3 rounded-xl border border-red-100 flex justify-between items-center">
+                      <p className="text-[10px] font-bold text-red-600 uppercase tracking-widest">Nợ hiện tại</p>
+                      <p className="text-sm font-bold text-red-700">{formatNumber((oldDebt || 0) + selectedInvoiceForDetail.debt)}đ</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex gap-3">
+                <button 
+                  onClick={() => navigate('/pos', { state: { editInvoice: selectedInvoiceForDetail } })}
+                  className="flex-1 py-3 bg-blue-50 border border-blue-200 text-blue-600 font-bold rounded-lg uppercase text-[10px] tracking-widest shadow-sm hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"
+                >
+                  <Edit3 size={16} /> Sửa hóa đơn
+                </button>
+                <button 
+                  onClick={() => setSelectedInvoiceForDetail(null)}
+                  className="flex-1 py-3 bg-[#991b1b] text-white font-bold rounded-lg uppercase text-[10px] tracking-widest shadow-md shadow-red-100 hover:bg-[#7f1d1d] transition-colors"
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Mobile Floating Action Button */}
+      <button 
+        onClick={() => setIsModalOpen(true)}
+        className="md:hidden fixed bottom-24 right-4 w-14 h-14 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg shadow-blue-200 z-40 active:scale-95 transition-transform"
+      >
+        <Plus size={24} />
+      </button>
     </div>
   );
 };

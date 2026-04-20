@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
+import { useScrollLock } from '../hooks/useScrollLock';
 import { User } from '../types';
 import { Plus, Search, Edit2, Trash2, Shield, User as UserIcon, Mail, Key, X, Check, AlertCircle } from 'lucide-react';
 
@@ -8,6 +9,8 @@ const Users: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+
+  useScrollLock(isModalOpen);
   
   // Form state
   const [username, setUsername] = useState('');
@@ -175,18 +178,18 @@ const Users: React.FC = () => {
 
       {/* User Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-md rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-0 md:p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md md:rounded-xl rounded-none shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full md:h-auto">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
               <h3 className="text-lg font-black text-slate-800 tracking-tight uppercase">
                 {editingUser ? 'Sửa người dùng' : 'Thêm người dùng mới'}
               </h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setIsModalOpen(false)} className="w-10 h-10 bg-white text-slate-400 rounded-full hover:bg-slate-200 transition-colors flex items-center justify-center shadow-sm">
                 <X size={24} />
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 flex-1 overflow-y-auto">
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Tên hiển thị</label>
                 <div className="relative">
@@ -251,18 +254,18 @@ const Users: React.FC = () => {
               </div>
             </div>
 
-            <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex gap-3">
-              <button 
-                onClick={() => setIsModalOpen(false)}
-                className="flex-1 py-3 border border-slate-200 text-slate-600 font-bold rounded-lg hover:bg-slate-100 transition-all"
-              >
-                Hủy
-              </button>
+            <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex gap-3 shrink-0">
               <button 
                 onClick={handleSave}
-                className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-all shadow-md flex items-center justify-center gap-2"
+                className="flex-1 py-3 bg-blue-600 text-white font-black rounded-lg hover:bg-blue-700 transition-all shadow-md flex items-center justify-center gap-2 uppercase text-[11px] tracking-widest active:scale-95"
               >
-                <Check size={20} /> Lưu thay đổi
+                Lưu
+              </button>
+              <button 
+                onClick={() => setIsModalOpen(false)}
+                className="flex-1 py-3 bg-[#991b1b] text-white font-black rounded-lg hover:bg-[#7f1d1d] transition-all shadow-md uppercase text-[10px] tracking-widest active:scale-95"
+              >
+                Đóng
               </button>
             </div>
           </div>

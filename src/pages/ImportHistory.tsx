@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ImportOrder } from '../types';
 import { formatNumber } from '../lib/utils';
 import { PrintTemplate } from '../components/PrintTemplate';
+import { useScrollLock } from '../hooks/useScrollLock';
 
 export const ImportHistory: React.FC = () => {
   const { importOrders, suppliers, setImportDraft, updateImportOrder, addCashTransaction } = useAppContext();
@@ -14,6 +15,9 @@ export const ImportHistory: React.FC = () => {
   const [printData, setPrintData] = useState<any>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
+  
+  // Use scroll lock for modals
+  useScrollLock(!!selectedOrder || isPaymentModalOpen);
 
   const handlePayment = () => {
     if (!selectedOrder) return;
@@ -114,8 +118,8 @@ export const ImportHistory: React.FC = () => {
   const paginatedOrders = filteredOrders.slice().reverse().slice(startIndex, endIndex);
 
   return (
-    <div className="h-full flex flex-col px-4 md:px-0 py-4 md:py-0">
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full mx-auto w-full">
+    <div className="flex flex-col px-4 md:px-0 py-4 md:py-0">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col mx-auto w-full">
         <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row gap-4 justify-between items-center bg-slate-50/50 shrink-0">
           <div className="relative w-full md:max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -127,17 +131,14 @@ export const ImportHistory: React.FC = () => {
               className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm outline-none focus:border-blue-500 shadow-sm font-medium transition-all"
             />
           </div>
-          <div className="flex gap-2 w-full md:w-auto">
-            <Link to="/import" className="flex-1 md:flex-none justify-center bg-indigo-50 text-indigo-600 border border-indigo-200 px-4 py-2 rounded-lg font-bold text-xs hover:bg-indigo-100 transition-colors shadow-sm flex items-center gap-2">
+          <div className="hidden md:flex gap-2">
+            <Link to="/import" className="bg-indigo-50 text-indigo-600 border border-indigo-200 px-4 py-2 rounded-lg font-bold text-xs hover:bg-indigo-100 transition-colors shadow-sm flex items-center gap-2">
               <Plus size={14} /> Nhập hàng
             </Link>
-            <button className="flex-1 md:flex-none justify-center bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-lg font-bold text-xs hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-2">
-              <FileDown size={14} /> <span className="hidden sm:inline">Xuất file</span>
-            </button>
           </div>
         </div>
         
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1">
           <table className="w-full text-left border-collapse whitespace-nowrap hidden md:table">
             <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 sticky top-0 z-10">
               <tr>
@@ -287,10 +288,10 @@ export const ImportHistory: React.FC = () => {
 
       {/* Order Detail Modal */}
       {selectedOrder && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm print:hidden">
-          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in duration-300">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center md:p-4 p-0 bg-slate-900/60 backdrop-blur-sm print:hidden">
+          <div className="bg-white w-full max-w-2xl md:rounded-2xl rounded-none shadow-2xl overflow-hidden flex flex-col h-full md:h-auto md:max-h-[90vh] animate-in fade-in zoom-in duration-300">
             {/* Modal Header */}
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
                   <Truck size={24} />
@@ -463,7 +464,7 @@ export const ImportHistory: React.FC = () => {
               </button>
               <button 
                 onClick={() => setSelectedOrder(null)}
-                className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-bold uppercase text-sm tracking-widest shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95"
+                className="flex-1 py-4 bg-[#991b1b] text-white rounded-xl font-bold uppercase text-sm tracking-widest shadow-lg shadow-red-100 hover:bg-[#7f1d1d] transition-all active:scale-95"
               >
                 Đóng
               </button>
@@ -532,6 +533,14 @@ export const ImportHistory: React.FC = () => {
       )}
 
       {printData && <PrintTemplate {...printData} />}
+      
+      {/* Mobile Floating Action Button */}
+      <Link 
+        to="/import" 
+        className="md:hidden fixed bottom-24 right-4 w-14 h-14 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg shadow-indigo-200 z-40 active:scale-95 transition-transform"
+      >
+        <Plus size={24} />
+      </Link>
     </div>
   );
 };

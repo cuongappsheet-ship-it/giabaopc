@@ -38,7 +38,7 @@ export const Reports: React.FC = () => {
   const totalProfit = Object.values(months).reduce((s, m) => s + m.profit, 0);
 
   return (
-    <div className="h-full overflow-y-auto px-4 md:px-0 py-4 md:py-0">
+    <div className="px-4 md:px-0 py-4 md:py-0">
       <div className="max-w-4xl mx-auto space-y-6 pb-6">
         <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-200 text-center relative overflow-hidden">
           <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Lợi nhuận gộp hệ thống</p>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Wallet, Calendar, ArrowUpRight, ArrowDownLeft, FileText, Printer, X, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
+import { useScrollLock } from '../hooks/useScrollLock';
 import { formatNumber, parseFormattedNumber, parseDateString } from '../lib/utils';
 import { generateId } from '../lib/idUtils';
 import { PrintTemplate } from '../components/PrintTemplate';
@@ -10,6 +11,8 @@ export const CashLedger: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'RECEIPT' | 'PAYMENT'>('ALL');
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  useScrollLock(isModalOpen);
 
   // Form state
   const [type, setType] = useState<'RECEIPT' | 'PAYMENT'>('RECEIPT');
@@ -88,7 +91,7 @@ export const CashLedger: React.FC = () => {
   };
 
   return (
-    <div className="h-full flex flex-col px-4 md:px-0 py-4 md:py-0">
+    <div className="flex flex-col px-4 md:px-0 py-4 md:py-0">
       {/* Print Template Container */}
       {printData && <PrintTemplate {...printData} />}
 
@@ -155,8 +158,8 @@ export const CashLedger: React.FC = () => {
         </button>
       </div>
 
-      <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col mb-6 print:hidden">
-        <div className="flex-1 overflow-auto">
+      <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col mb-6 print:hidden">
+        <div className="flex-1">
           <table className="w-full text-left border-collapse hidden md:table">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
@@ -390,12 +393,20 @@ export const CashLedger: React.FC = () => {
                 </select>
               </div>
               
-              <button 
-                onClick={handleAddTransaction}
-                className="w-full bg-blue-600 text-white py-3.5 rounded-lg font-semibold shadow-md shadow-blue-200 tracking-wide mt-2 active:scale-95 transition-all hover:bg-blue-700"
-              >
-                Lưu phiếu
-              </button>
+              <div className="flex gap-3 mt-2">
+                <button 
+                  onClick={handleAddTransaction}
+                  className="flex-[2] bg-blue-600 text-white py-3.5 rounded-lg font-semibold shadow-md shadow-blue-200 tracking-wide active:scale-95 transition-all hover:bg-blue-700"
+                >
+                  Lưu phiếu
+                </button>
+                <button 
+                  onClick={() => setIsModalOpen(false)}
+                  className="flex-1 bg-[#991b1b] text-white py-3.5 rounded-lg font-black uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] active:scale-95 transition-all"
+                >
+                  Đóng
+                </button>
+              </div>
             </div>
           </div>
         </div>
