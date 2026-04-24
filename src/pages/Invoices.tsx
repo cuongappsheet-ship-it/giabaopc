@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, FileDown, Star, X, Calendar, User, CreditCard, Package, FileText, Printer, RotateCcw, Wallet, ChevronLeft, ChevronRight, Edit3 } from 'lucide-react';
+import { Search, Plus, FileDown, Star, X, Calendar, User, CreditCard, Package, FileText, Printer, RotateCcw, Wallet, ChevronLeft, ChevronRight, Edit3, Image as ImageIcon } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Invoice } from '../types';
-import { formatNumber } from '../lib/utils';
+import { formatNumber, formatDateTime } from '../lib/utils';
 import { PrintTemplate } from '../components/PrintTemplate';
 import { useScrollLock } from '../hooks/useScrollLock';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 export const Invoices: React.FC = () => {
-  const { invoices, customers, addCashTransaction, updateInvoice, returnSalesOrders } = useAppContext();
+  const { invoices, customers, addCashTransaction, updateInvoice, returnSalesOrders, products } = useAppContext();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchTerm, setSearchTerm] = useState('');
@@ -20,6 +21,10 @@ export const Invoices: React.FC = () => {
   
   // Lock scroll when modals are open
   useScrollLock(!!selectedInvoice || isPaymentModalOpen);
+
+  // Handle Escape key to close modals in layers
+  useEscapeKey(() => setIsPaymentModalOpen(false), isPaymentModalOpen);
+  useEscapeKey(() => setSelectedInvoice(null), !!selectedInvoice);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -203,10 +208,10 @@ export const Invoices: React.FC = () => {
                     <td className="py-4 px-4">
                       <div className="flex items-center gap-2">
                         <Star className="text-slate-300 hover:text-yellow-400 cursor-pointer transition-colors" size={16} />
-                        <span className={`font-bold ${inv.total < 0 ? 'text-red-600' : 'text-blue-600'} group-hover:underline`}>{inv.id}</span>
+                        <span className={`font-bold ${inv.total < 0 ? 'text-red-600' : 'text-blue-600'}`}>{inv.id}</span>
                       </div>
                     </td>
-                    <td className="py-4 px-4 text-xs text-slate-500 font-medium">{inv.date}</td>
+                    <td className="py-4 px-4 text-xs text-slate-500 font-medium">{formatDateTime(inv.date)}</td>
                     <td className="py-4 px-4">
                       <p className="font-bold text-slate-800">{inv.customer}</p>
                       <p className="text-[10px] font-medium text-slate-500 tracking-wide">{inv.phone}</p>
@@ -230,7 +235,7 @@ export const Invoices: React.FC = () => {
           </table>
 
           {/* Mobile Card View */}
-          <div className="md:hidden divide-y divide-slate-100">
+          <div className="md:hidden bg-slate-50 p-3 space-y-3 rounded-b-xl border-t border-slate-100">
             {filteredInvoices.length === 0 ? (
               <div className="text-center py-24 italic text-slate-300 font-black uppercase tracking-widest text-xs opacity-50">
                 Danh sách hóa đơn trống
@@ -240,35 +245,41 @@ export const Invoices: React.FC = () => {
                 <div 
                   key={`${inv.id}-${idx}`} 
                   onClick={() => setSelectedInvoice(inv)}
-                  className="p-4 space-y-3 active:bg-blue-50/50 transition-colors"
+                  className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 active:border-blue-300 transition-colors cursor-pointer"
                 >
-                  <div className="flex justify-between items-start">
-                    <div className="flex items-center gap-2">
-                      <Star className="text-slate-300" size={16} />
-                      <span className={`font-bold text-sm ${inv.total < 0 ? 'text-red-600' : 'text-blue-600'}`}>{inv.id}</span>
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex-1 pr-3">
+                      <p className="font-bold text-slate-800 text-base leading-tight">{inv.customer}</p>
+                      <div className="flex items-center flex-wrap gap-1.5 mt-1.5">
+                        <span className={`font-bold text-[10px] px-1.5 py-0.5 rounded border ${inv.total < 0 ? 'text-red-600 border-red-200 bg-red-50' : 'text-slate-600 border-slate-200 bg-slate-50'} tracking-wider`}>
+                          {inv.id}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">· {formatDateTime(inv.date)}</span>
+                      </div>
                     </div>
-                    <span className="text-[10px] text-slate-400 font-medium">{inv.date}</span>
-                  </div>
-                  
-                  <div className="flex justify-between items-end">
-                    <div>
-                      <p className="font-bold text-slate-800 text-sm">{inv.customer}</p>
-                      <p className="text-[10px] font-medium text-slate-500 tracking-wide">{inv.phone}</p>
-                    </div>
-                    <div className="text-right">
-                      <div className="mb-2">
+                    <div className="text-right shrink-0">
+                      <div>
                         {inv.total < 0 ? (
-                          <span className="bg-red-100 text-red-600 text-[8px] px-2 py-0.5 rounded font-bold uppercase tracking-wider">Trả hàng</span>
+                          <span className="bg-red-50 text-red-600 text-[9px] px-2.5 py-1 rounded border border-red-100 font-bold uppercase tracking-wider inline-block">Trả hàng</span>
                         ) : inv.debt > 0 ? (
-                          <span className="bg-orange-100 text-orange-600 text-[8px] px-2 py-0.5 rounded font-bold uppercase tracking-wider">Còn Nợ</span>
+                          <span className="bg-orange-50 text-orange-600 text-[9px] px-2.5 py-1 rounded border border-orange-100 font-bold uppercase tracking-wider inline-block">Còn Nợ</span>
                         ) : (
-                          <span className="bg-emerald-100 text-emerald-600 text-[8px] px-2 py-0.5 rounded font-bold uppercase tracking-wider">Hoàn Tất</span>
+                          <span className="bg-emerald-50 text-emerald-600 text-[9px] px-2.5 py-1 rounded border border-emerald-100 font-bold uppercase tracking-wider inline-block">Hoàn Tất</span>
                         )}
                       </div>
-                      <p className={`font-bold ${inv.total < 0 ? 'text-red-600' : 'text-slate-800'} text-base`}>
-                        {formatNumber(inv.total)}đ
-                      </p>
                     </div>
+                  </div>
+                  
+                  <div className="flex justify-between items-end border-t border-slate-100 pt-3">
+                    <div className="flex items-center gap-2">
+                       <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center text-[10px] font-bold">
+                         {inv.items.length}
+                       </span>
+                       <span className="text-xs font-semibold text-slate-500">Mặt hàng</span>
+                    </div>
+                    <p className={`font-black ${inv.total < 0 ? 'text-red-600' : 'text-blue-600'} text-lg leading-none`}>
+                      {formatNumber(inv.total)}đ
+                    </p>
                   </div>
                 </div>
               ))
@@ -439,44 +450,100 @@ export const Invoices: React.FC = () => {
                   <Package className="text-slate-400" size={14} />
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Danh sách mặt hàng</span>
                 </div>
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-50">
-                      <th className="px-4 py-3 text-[9px] font-bold text-slate-400 uppercase">Sản phẩm</th>
-                      <th className="px-4 py-3 text-[9px] font-bold text-slate-400 uppercase text-center">SL</th>
-                      <th className="px-4 py-3 text-[9px] font-bold text-slate-400 uppercase text-right">Đơn giá</th>
-                      <th className="px-4 py-3 text-[9px] font-bold text-slate-400 uppercase text-right">Thành tiền</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {selectedInvoice.items.map((item, idx) => (
-                      <tr key={idx}>
-                        <td className="px-4 py-3">
-                          <p className="text-xs font-bold text-slate-800 tracking-tighter">{item.name}</p>
-                          <div className="flex flex-wrap gap-2 mt-1">
+                {/* Desktop Table View */}
+                <div className="hidden md:block">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-50">
+                        <th className="px-4 py-3 text-[9px] font-bold text-slate-400 uppercase">Sản phẩm</th>
+                        <th className="px-4 py-3 text-[9px] font-bold text-slate-400 uppercase text-center">SL</th>
+                        <th className="px-4 py-3 text-[9px] font-bold text-slate-400 uppercase text-right">Đơn giá</th>
+                        <th className="px-4 py-3 text-[9px] font-bold text-slate-400 uppercase text-right">Thành tiền</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {selectedInvoice.items.map((item, idx) => (
+                        <tr key={idx}>
+                          <td className="px-4 py-3">
+                            <p className="text-xs font-bold text-slate-800 tracking-tighter">{item.name}</p>
+                            <p className="text-[10px] text-slate-400 font-medium mb-1">{item.id}</p>
+                            <div className="flex flex-wrap gap-2 mt-1">
+                              {item.sn && (
+                                <div className="flex flex-wrap gap-1">
+                                  {(Array.isArray(item.sn) ? item.sn : item.sn.split(',')).map((sn: string, sIdx: number) => (
+                                    <span key={sIdx} className="text-[13px] bg-orange-50 text-orange-600 px-2 py-0.5 rounded font-mono font-bold border border-orange-100 uppercase">
+                                      {sn.trim()}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {item.warrantyExpiry && (
+                                <span className="text-[11px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded font-bold border border-blue-100 uppercase tracking-tight">
+                                  BH đến: {item.warrantyExpiry}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center text-xs font-bold text-slate-600">{item.qty}</td>
+                          <td className="px-4 py-3 text-right text-xs font-bold text-slate-600">{formatNumber(item.price)}đ</td>
+                          <td className="px-4 py-3 text-right text-xs font-bold text-slate-800">{formatNumber(item.qty * item.price)}đ</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Card List View */}
+                <div className="md:hidden divide-y divide-slate-100 bg-white">
+                  {selectedInvoice.items.map((item, idx) => {
+                    const product = products.find(p => p.id === item.id);
+                    return (
+                    <div key={idx} className="p-4 flex gap-4">
+                      <div className="w-14 h-14 bg-blue-50 rounded-xl flex items-center justify-center shrink-0 border border-blue-100 overflow-hidden mt-1">
+                        {product?.image ? (
+                          <img src={product.image} alt={item.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <ImageIcon size={24} className="text-blue-400" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-sm text-slate-800 leading-snug break-words">{item.name}</p>
+                        <p className="text-[11px] text-slate-400 font-medium mb-1.5 uppercase tracking-wide">{item.id}</p>
+                        
+                        {(item.sn || item.warrantyExpiry) && (
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mb-2 border-l-2 border-slate-200 pl-2">
                             {item.sn && (
-                              <div className="flex flex-wrap gap-1">
-                                {(Array.isArray(item.sn) ? item.sn : item.sn.split(',')).map((sn: string, sIdx: number) => (
-                                  <span key={sIdx} className="text-[13px] bg-orange-50 text-orange-600 px-2 py-0.5 rounded font-mono font-bold border border-orange-100 uppercase">
-                                    {sn.trim()}
-                                  </span>
-                                ))}
-                              </div>
+                                <div className="flex flex-wrap items-center gap-1">
+                                  <span className="text-[10px] text-slate-400 font-bold uppercase">IMEI:</span>
+                                  <div className="flex flex-wrap gap-x-1">
+                                    {(Array.isArray(item.sn) ? item.sn : item.sn.split(',')).map((sn: string, sIdx: number) => (
+                                      <span key={sIdx} className="text-[11px] text-slate-600 font-mono font-bold">
+                                        {sn.trim()}{sIdx < (Array.isArray(item.sn) ? item.sn.length : item.sn.split(',').length) - 1 ? ',' : ''}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
                             )}
                             {item.warrantyExpiry && (
-                              <span className="text-[11px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded font-bold border border-blue-100 uppercase tracking-tight">
-                                BH đến: {item.warrantyExpiry}
+                              <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-bold border border-blue-100 uppercase inline-block whitespace-nowrap">
+                                BH: {item.warrantyExpiry}
                               </span>
                             )}
                           </div>
-                        </td>
-                        <td className="px-4 py-3 text-center text-xs font-bold text-slate-600">{item.qty}</td>
-                        <td className="px-4 py-3 text-right text-xs font-bold text-slate-600">{formatNumber(item.price)}đ</td>
-                        <td className="px-4 py-3 text-right text-xs font-bold text-slate-800">{formatNumber(item.qty * item.price)}đ</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        )}
+                        
+                        <div className="flex justify-between items-end mt-1">
+                          <p className="text-sm text-slate-600 font-medium">
+                            {formatNumber(item.price)} <span className="text-slate-400 text-xs mx-1">x</span> {item.qty}
+                          </p>
+                          <p className="font-black text-slate-800 text-base">
+                            {formatNumber(item.qty * item.price)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )})}
+                </div>
               </div>
 
               <div className="bg-blue-50/50 p-6 rounded-xl border border-blue-100 space-y-3">

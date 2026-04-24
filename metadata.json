@@ -1,5 +1,7 @@
 {
-  "name": "Digikiot",
+  "name": "Digikiot 24/4 ver 1",
   "description": "dự án quản lý bán hàng",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "geolocation"
+  ]
 }

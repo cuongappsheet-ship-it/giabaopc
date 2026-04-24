@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Wallet, Calendar, ArrowUpRight, ArrowDownLeft, FileText, Printer, X, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { useScrollLock } from '../hooks/useScrollLock';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { formatNumber, parseFormattedNumber, parseDateString } from '../lib/utils';
 import { generateId } from '../lib/idUtils';
 import { PrintTemplate } from '../components/PrintTemplate';
@@ -13,6 +14,7 @@ export const CashLedger: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   useScrollLock(isModalOpen);
+  useEscapeKey(() => setIsModalOpen(false), isModalOpen);
 
   // Form state
   const [type, setType] = useState<'RECEIPT' | 'PAYMENT'>('RECEIPT');

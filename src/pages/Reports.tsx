@@ -24,11 +24,11 @@ export const Reports: React.FC = () => {
     if (inv.total > 0) {
       months[monthKey].rev += inv.total;
       months[monthKey].orders += 1;
-      let invCost = inv.items.reduce((s, it) => s + (it.importPriceTotal || 0), 0); 
+      let invCost = inv.items.reduce((s, it) => s + (it.importPriceTotal || ((it.qty || 0) * (it.importPrice || 0))), 0); 
       months[monthKey].cost += invCost;
     } else {
       months[monthKey].rev += inv.total;
-      let refundCost = inv.items.reduce((s, it) => s + (it.importPriceTotal || 0), 0);
+      let refundCost = inv.items.reduce((s, it) => s + (it.importPriceTotal || ((it.qty || 0) * (it.importPrice || 0))), 0);
       months[monthKey].cost -= refundCost;
     }
     months[monthKey].profit = months[monthKey].rev - months[monthKey].cost;

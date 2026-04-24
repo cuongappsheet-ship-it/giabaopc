@@ -10,10 +10,11 @@ import { PrintTemplate } from '../components/PrintTemplate';
 import { ProductDetailModal } from '../components/ProductDetailModal';
 import { useScrollLock } from '../hooks/useScrollLock';
 import { useMobileBackModal } from '../hooks/useMobileBackModal';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 export const Import: React.FC = () => {
   const navigate = useNavigate();
-  const { products, suppliers, importOrders, cashTransactions, addImportOrder, addSupplier, updateProduct, addSerial, addCashTransaction, importDraft, setImportDraft, serials } = useAppContext();
+  const { products, suppliers, importOrders, cashTransactions, addImportOrder, addSupplier, updateProduct, addProduct, addSerial, addCashTransaction, importDraft, setImportDraft, serials } = useAppContext();
   const [searchTerm, setSearchTerm] = useState('');
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
   
@@ -33,9 +34,15 @@ export const Import: React.FC = () => {
   const [shippingFee, setShippingFee] = useState(0);
   const [otherCost, setOtherCost] = useState(0);
   const [note, setNote] = useState('');
+
+  const [transactionDate, setTransactionDate] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}T${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  });
   
   // Modals
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
+  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [isMobileProductSearchOpen, setIsMobileProductSearchOpen] = useState(false);
   const [isMobileSupplierSearchOpen, setIsMobileSupplierSearchOpen] = useState(false);
   const [isMobileCheckoutOpen, setIsMobileCheckoutOpen] = useState(false);
@@ -46,13 +53,69 @@ export const Import: React.FC = () => {
   const [showSuccessModal, setShowSuccessModal] = useState<{id: string, total: number} | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showDraftPrompt, setShowDraftPrompt] = useState(() => {
+    if (importDraft?.cart && importDraft.cart.length > 0 && !importDraft.isExplicitIntent) {
+      return true;
+    }
+    return false;
+  });
 
   // Lock scroll when modals are open
-  useScrollLock(!!viewingProduct || isSupplierModalOpen || isMobileProductSearchOpen || isMobileSupplierSearchOpen || isMobileCheckoutOpen || !!showSuccessModal || showConfirmModal);
+  useScrollLock(!!viewingProduct || isSupplierModalOpen || isProductModalOpen || isMobileProductSearchOpen || isMobileSupplierSearchOpen || isMobileCheckoutOpen || !!showSuccessModal || showConfirmModal || showDraftPrompt);
+
+  // New Product Form State
+  const [newName, setNewName] = useState('');
+  const [newPrice, setNewPrice] = useState('');
+  const [newCost, setNewCost] = useState('');
+  const [newUnit, setNewUnit] = useState('Cái');
+  const [newCategory, setNewCategory] = useState('');
+  const [newHasSerial, setNewHasSerial] = useState(false);
+
+  const hasProductModalChanges = () => {
+    return (
+      newName !== '' ||
+      newPrice !== '' ||
+      newCost !== '' ||
+      newUnit !== 'Cái' ||
+      newCategory !== '' ||
+      newHasSerial !== false
+    );
+  };
+
+  const handleCloseProductModal = () => {
+    if (hasProductModalChanges()) {
+      if (window.confirm('Bạn có thay đổi chưa lưu. Bạn có chắc chắn muốn đóng mà không lưu không?')) {
+        setIsProductModalOpen(false);
+        resetProductForm();
+      }
+    } else {
+      setIsProductModalOpen(false);
+      resetProductForm();
+    }
+  };
+
+  const resetProductForm = () => {
+    setNewName('');
+    setNewPrice('');
+    setNewCost('');
+    setNewUnit('');
+    setNewCategory('');
+    setNewHasSerial(false);
+  };
+
+  // Handle Escape key
+  useEscapeKey(() => setShowSuccessModal(null), !!showSuccessModal);
+  useEscapeKey(() => setShowConfirmModal(false), showConfirmModal);
+  useEscapeKey(() => setIsMobileCheckoutOpen(false), isMobileCheckoutOpen);
+  useEscapeKey(handleCloseProductModal, isProductModalOpen);
+  useEscapeKey(() => setIsSupplierModalOpen(false), isSupplierModalOpen);
+  useEscapeKey(() => setViewingProduct(null), !!viewingProduct);
 
   const [paidAmount, setPaidAmount] = useState<number>(importDraft?.paid as number || 0);
 
   useEffect(() => {
+    if (showDraftPrompt) return; // Don't sync draft while prompt is open
+
     // Only update draft if values actually changed to avoid unnecessary re-renders
     if (
       importDraft?.cart !== cart || 
@@ -61,7 +124,7 @@ export const Import: React.FC = () => {
     ) {
       setImportDraft({ cart, selectedSupplier, paid: paidAmount });
     }
-  }, [cart, selectedSupplier, paidAmount, setImportDraft, importDraft]);
+  }, [cart, selectedSupplier, paidAmount, setImportDraft, importDraft, showDraftPrompt]);
 
   const totalGoods = cart.reduce((sum, item) => sum + (item.price * item.qty) - (item.discount || 0), 0);
   const finalTotal = totalGoods - overallDiscount + returnCost + otherCost + shippingFee;
@@ -132,7 +195,7 @@ export const Import: React.FC = () => {
   };
 
   const updateQty = (id: string, qty: number) => {
-    const product = products.find(p => p.id === id);
+    const product = (products || []).find(p => p.id === id);
     if (product?.hasSerial) return;
     if (qty < 0) return;
     setCart(prev => prev.map(item => item.id === id ? { ...item, qty } : item));
@@ -160,7 +223,7 @@ export const Import: React.FC = () => {
     const upperSn = sn.toUpperCase();
     
     // Check if serial already exists in the system
-    const existingSerial = serials?.find(s => s.sn.toUpperCase() === upperSn);
+    const existingSerial = serials?.find(s => (s.sn || '').toUpperCase() === upperSn);
     if (existingSerial) {
       alert(`Mã serial ${upperSn} đã tồn tại trong hệ thống!`);
       return;
@@ -213,9 +276,11 @@ export const Import: React.FC = () => {
     setShowConfirmModal(false);
 
     try {
-      const now = new Date();
+      const [y, m, d, hh, min] = transactionDate.split(/[-T:]/);
+      const dateStr = `${hh}:${min}:00 ${d}/${m}/${y}`;
+      const now = new Date(`${y}-${m}-${d}T${hh}:${min}:00`);
+
       const importId = importCode === 'Mã phiếu tự động' ? generateId('NH', importOrders) : importCode;
-      const dateStr = now.toLocaleString('vi-VN');
 
       const order: ImportOrder = {
         id: importId,
@@ -242,7 +307,7 @@ export const Import: React.FC = () => {
 
       // Update stock and add serials/stock cards
       for (const item of cart) {
-        const p = products.find(x => x.id === item.id);
+        const p = (products || []).find(x => x.id === item.id);
         if (p) {
           updateProduct(item.id, { 
             stock: (p.stock || 0) + item.qty,
@@ -349,7 +414,7 @@ export const Import: React.FC = () => {
             <div className="flex flex-col gap-3">
               <button 
                 onClick={() => {
-                  const order = importOrders.find(o => o.id === showSuccessModal.id);
+                  const order = (importOrders || []).find(o => o.id === showSuccessModal.id);
                   if (order) {
                     handlePrint({
                       title: 'PHIẾU NHẬP HÀNG',
@@ -410,15 +475,29 @@ export const Import: React.FC = () => {
                 type="text" 
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && searchTerm.trim() !== '' && productSuggestions.length === 0) {
+                    resetProductForm();
+                    setIsProductModalOpen(true);
+                    setProductSuggestions([]);
+                  } else if (e.key === 'Enter' && productSuggestions.length === 1) {
+                    addToCart(productSuggestions[0]);
+                    setSearchTerm('');
+                    setProductSuggestions([]);
+                  }
+                }}
                 placeholder="Tìm hàng (F3)" 
                 className="flex-1 bg-transparent text-sm outline-none font-medium"
               />
               <div className="flex items-center gap-1 md:gap-2">
                 <LayoutGrid size={18} className="text-slate-400 cursor-pointer hover:text-slate-600 hidden sm:block" />
-                <Plus size={18} className="text-slate-400 cursor-pointer hover:text-slate-600" />
+                <Plus onClick={() => {
+                  resetProductForm();
+                  setIsProductModalOpen(true);
+                }} size={18} className="text-slate-400 cursor-pointer hover:text-slate-600" />
               </div>
             </div>
-            {productSuggestions.length > 0 && (
+            {(productSuggestions.length > 0 || (searchTerm.trim() !== '' && productSuggestions.length === 0)) && (
               <div className="absolute top-full left-0 right-0 z-[60] bg-white border border-slate-200 rounded-lg shadow-2xl mt-1 max-h-[400px] overflow-y-auto">
                 {productSuggestions.map(p => (
                   <div 
@@ -440,6 +519,20 @@ export const Import: React.FC = () => {
                     {p.hasSerial && <span className="text-[10px] bg-orange-100 text-orange-600 px-2 py-0.5 rounded font-bold">Serial</span>}
                   </div>
                 ))}
+                {searchTerm.trim() !== '' && (
+                  <div className="p-3 bg-slate-50 border-t border-slate-100">
+                    <button 
+                      onClick={() => {
+                        resetProductForm();
+                        setIsProductModalOpen(true);
+                        setProductSuggestions([]);
+                      }}
+                      className="w-full py-3 px-3 flex items-center justify-center gap-2 text-blue-600 bg-white border border-blue-200 rounded-xl hover:bg-blue-50 transition-all text-sm font-bold shadow-sm active:scale-[0.98]"
+                    >
+                      <Plus size={18} /> Thêm sản phẩm mới "{searchTerm}"
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -513,14 +606,14 @@ export const Import: React.FC = () => {
                       </td>
                       <td className="p-3 text-sm text-slate-600 font-medium">{index + 1}</td>
                       <td className="p-3 text-sm text-blue-600 font-semibold cursor-pointer hover:underline" onClick={() => {
-                        const p = products.find(prod => prod.id === item.id);
+                        const p = (products || []).find(prod => prod.id === item.id);
                         if (p) setViewingProduct(p);
                       }}>{item.id}</td>
                       <td className="p-3">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded border border-slate-100 bg-slate-50 flex-shrink-0 flex items-center justify-center overflow-hidden">
-                            {products.find(p => p.id === item.id)?.image ? (
-                              <img src={products.find(p => p.id === item.id)?.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            {(products || []).find(p => p.id === item.id)?.image ? (
+                              <img src={(products || []).find(p => p.id === item.id)?.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                             ) : (
                               <ImageIcon size={14} className="text-slate-300" />
                             )}
@@ -622,7 +715,7 @@ export const Import: React.FC = () => {
               </div>
             ) : (
               cart.map((item, index) => {
-                const product = products.find(p => p.id === item.id);
+                const product = (products || []).find(p => p.id === item.id);
                 return (
                   <div key={item.id} className="p-4 flex gap-3">
                     <div className="w-16 h-16 bg-slate-100 rounded-lg shrink-0 flex items-center justify-center overflow-hidden">
@@ -809,6 +902,15 @@ export const Import: React.FC = () => {
         {/* Summary Fields */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div className="flex justify-between items-center">
+            <span className="text-sm font-medium text-slate-600">Thời gian</span>
+            <input 
+              type="datetime-local"
+              value={transactionDate}
+              onChange={(e) => setTransactionDate(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs font-bold outline-none focus:border-blue-500"
+            />
+          </div>
+          <div className="flex justify-between items-center">
             <span className="text-sm font-medium text-slate-600">Mã phiếu nhập</span>
             <input 
               type="text" 
@@ -946,13 +1048,41 @@ export const Import: React.FC = () => {
                 autoFocus
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && searchTerm.trim() !== '' && productSuggestions.length === 0) {
+                    resetProductForm();
+                    setIsProductModalOpen(true);
+                    setIsMobileProductSearchOpen(false);
+                    setProductSuggestions([]);
+                  } else if (e.key === 'Enter' && productSuggestions.length === 1) {
+                    addToCart(productSuggestions[0]);
+                    setIsMobileProductSearchOpen(false);
+                    setSearchTerm('');
+                    setProductSuggestions([]);
+                  }
+                }}
                 placeholder="Tên, mã hàng, mã vạch..." 
                 className="bg-transparent border-none outline-none flex-1 ml-2 text-sm font-medium" 
               />
             </div>
           </div>
           <div className="flex-1 overflow-y-auto">
-            {(searchTerm.trim() ? productSuggestions : products.filter(p => !p.isService)).map(p => (
+            {searchTerm.trim() !== '' && productSuggestions.length === 0 && (
+              <div className="p-8 text-center bg-blue-50/30">
+                <p className="text-sm text-slate-500 mb-6 font-medium">Không tìm thấy sản phẩm "{searchTerm}"</p>
+                <button 
+                  onClick={() => {
+                    resetProductForm();
+                    setIsProductModalOpen(true);
+                    setIsMobileProductSearchOpen(false);
+                  }}
+                  className="w-full py-4 bg-blue-600 text-white font-bold rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-blue-100 active:scale-95 transition-all text-sm uppercase tracking-widest"
+                >
+                  <Plus size={20} /> Tạo mới hàng hóa này
+                </button>
+              </div>
+            )}
+            {(searchTerm.trim() ? productSuggestions : (products || []).filter(p => !p.isService)).map(p => (
               <div 
                 key={p.id} 
                 onClick={() => {
@@ -1000,8 +1130,8 @@ export const Import: React.FC = () => {
           </div>
           <div className="flex-1 overflow-y-auto">
             {(mobileSupplierSearchTerm.trim() 
-              ? suppliers.filter(s => s.name.toLowerCase().includes(mobileSupplierSearchTerm.toLowerCase()) || s.phone.includes(mobileSupplierSearchTerm))
-              : suppliers
+              ? (suppliers || []).filter(s => (s.name || '').toLowerCase().includes(mobileSupplierSearchTerm.toLowerCase()) || (s.phone || '').includes(mobileSupplierSearchTerm))
+              : (suppliers || [])
             ).map(s => (
               <div 
                 key={s.phone} 
@@ -1044,7 +1174,16 @@ export const Import: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white p-4 space-y-5 shadow-sm">
+            <div className="bg-white p-4 space-y-4 shadow-sm">
+              <div className="flex justify-between items-center sm:hidden">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Thời gian</span>
+                <input 
+                  type="datetime-local"
+                  value={transactionDate}
+                  onChange={(e) => setTransactionDate(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] font-bold outline-none focus:border-blue-400"
+                />
+              </div>
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-bold text-slate-800">Tổng tiền hàng</span>
@@ -1114,6 +1253,134 @@ export const Import: React.FC = () => {
         />
       )}
 
+      {/* New Product Modal */}
+      {isProductModalOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in duration-200">
+            <div className="p-6 border-b border-slate-100 bg-slate-50">
+              <h3 className="text-xl font-bold text-slate-800 leading-tight">Thêm sản phẩm mới</h3>
+              <p className="text-xs text-slate-500 font-medium mt-1">Tạo nhanh sản phẩm khi nhập hàng</p>
+              <button 
+                onClick={handleCloseProductModal}
+                className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center bg-white rounded-full text-slate-400 hover:text-slate-600 border border-slate-100 shadow-sm transition-all"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Tên sản phẩm *</label>
+                <input 
+                  type="text" 
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="Nhập tên sản phẩm..."
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-blue-500 focus:bg-white transition-all mt-1 shadow-sm"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Giá nhập (vốn)</label>
+                  <NumericFormat 
+                    value={newCost}
+                    onValueChange={(v) => setNewCost(v.value)}
+                    thousandSeparator="."
+                    decimalSeparator=","
+                    placeholder="0"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-blue-500 focus:bg-white transition-all mt-1 shadow-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Giá bán ra *</label>
+                  <NumericFormat 
+                    value={newPrice}
+                    onValueChange={(v) => setNewPrice(v.value)}
+                    thousandSeparator="."
+                    decimalSeparator=","
+                    placeholder="0"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-blue-500 focus:bg-white transition-all mt-1 shadow-sm"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Đơn vị tính</label>
+                  <input 
+                    type="text" 
+                    value={newUnit}
+                    onChange={(e) => setNewUnit(e.target.value)}
+                    placeholder="Cái, Bộ, Mét..."
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-blue-500 focus:bg-white transition-all mt-1 shadow-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Danh mục</label>
+                  <input 
+                    type="text" 
+                    value={newCategory}
+                    onChange={(e) => setNewCategory(e.target.value)}
+                    placeholder="Nhóm sản phẩm..."
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-blue-500 focus:bg-white transition-all mt-1 shadow-sm"
+                  />
+                </div>
+              </div>
+              <div className="pt-2">
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <div className="relative">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer"
+                      checked={newHasSerial}
+                      onChange={(e) => setNewHasSerial(e.target.checked)}
+                    />
+                    <div className="w-12 h-6 bg-slate-200 rounded-full peer peer-checked:bg-blue-600 transition-all"></div>
+                    <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-all peer-checked:translate-x-6 shadow-sm"></div>
+                  </div>
+                  <span className="text-sm font-bold text-slate-700 group-hover:text-blue-600 transition-colors">Quản lý theo mã Serial / Imei</span>
+                </label>
+              </div>
+            </div>
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex gap-3">
+              <button 
+                onClick={handleCloseProductModal}
+                className="flex-1 py-3 bg-white text-slate-600 border border-slate-200 rounded-xl text-sm font-bold hover:bg-slate-50 transition-all shadow-sm"
+              >
+                Hủy
+              </button>
+              <button 
+                onClick={() => {
+                  if (!newName || !newPrice) return alert('Vui lòng nhập đủ tên và giá bán!');
+                  
+                  const colors = ['bg-blue-600', 'bg-indigo-600', 'bg-purple-600', 'bg-emerald-500', 'bg-rose-500'];
+                  const id = generateId('SP', products);
+                  const newProd: Product = {
+                    id,
+                    name: newName,
+                    price: parseFormattedNumber(newPrice),
+                    importPrice: parseFormattedNumber(newCost) || 0,
+                    stock: 0,
+                    hasSerial: newHasSerial,
+                    color: colors[products.length % colors.length],
+                    unit: newUnit,
+                    category: newCategory,
+                    isService: false
+                  };
+                  
+                  addProduct(newProd);
+                  addToCart(newProd);
+                  setIsProductModalOpen(false);
+                  resetProductForm();
+                  setSearchTerm('');
+                }}
+                className="flex-1 py-3 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100"
+              >
+                Lưu & Thêm vào phiếu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add Supplier Modal */}
       {isSupplierModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm print:hidden">
@@ -1138,14 +1405,24 @@ export const Import: React.FC = () => {
                   placeholder="Nhập số điện thoại..." 
                 />
               </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Địa chỉ</label>
+                <input 
+                  id="new-sup-address"
+                  type="text" 
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold outline-none focus:border-blue-400 focus:bg-white transition-all mt-1" 
+                  placeholder="Nhập địa chỉ..." 
+                />
+              </div>
               <div className="flex flex-col gap-2 pt-4">
                 <button 
                   onClick={() => {
                     const name = (document.getElementById('new-sup-name') as HTMLInputElement).value;
                     const phone = (document.getElementById('new-sup-phone') as HTMLInputElement).value;
+                    const address = (document.getElementById('new-sup-address') as HTMLInputElement)?.value || '';
                     if (name && phone) {
-                      addSupplier({ name, phone });
-                      setSelectedSupplier({ name, phone });
+                      addSupplier({ name, phone, address });
+                      setSelectedSupplier({ name, phone, address, id: 'temp', totalBuy: 0, totalDebt: 0 });
                       setIsSupplierModalOpen(false);
                     }
                   }}
@@ -1187,6 +1464,46 @@ export const Import: React.FC = () => {
                   className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors shadow-md shadow-blue-200"
                 >
                   {isSubmitting ? 'Đang xử lý...' : 'Đồng ý'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Draft Prompt Modal */}
+      {showDraftPrompt && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <FileText size={32} />
+              </div>
+              <h3 className="text-xl font-black text-slate-800 mb-2">Đơn nhập chưa hoàn thành</h3>
+              <p className="text-slate-500 text-sm mb-6">Bạn có đơn nhập hàng đang tạo dở. Bạn có muốn tiếp tục hay tạo một đơn mới?</p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => {
+                    setCart([]);
+                    setSelectedSupplier(null);
+                    setPaidAmount(0);
+                    setImportDraft(undefined);
+                    setShowDraftPrompt(false);
+                  }}
+                  className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors"
+                >
+                  Tạo mới
+                </button>
+                <button 
+                  onClick={() => {
+                    if (importDraft) {
+                      setImportDraft({ ...importDraft, isExplicitIntent: true });
+                    }
+                    setShowDraftPrompt(false);
+                  }}
+                  className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition-colors shadow-md shadow-emerald-200"
+                >
+                  Tiếp tục
                 </button>
               </div>
             </div>

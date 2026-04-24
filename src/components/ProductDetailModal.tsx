@@ -19,7 +19,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 }) => {
   const { stockCards, invoices, importOrders, returnImportOrders, returnSalesOrders, serials } = useAppContext();
   
-  const [detailTab, setDetailTab] = useState<'stock' | 'serial'>('stock');
+  const [detailTab, setDetailTab] = useState<'info' | 'stock' | 'serial'>('info');
   const [stockFilter, setStockFilter] = useState<'ALL' | 'IN' | 'OUT'>('ALL');
   const [serialSearchTerm, setSerialSearchTerm] = useState('');
   const [serialStatusTab, setSerialStatusTab] = useState<'ALL' | 'IN_STOCK' | 'SOLD'>('IN_STOCK');
@@ -121,17 +121,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       <div className="bg-white w-full max-w-4xl md:rounded-2xl rounded-none shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full md:h-auto md:max-h-[90vh]">
         <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-start shrink-0">
           <div>
-            <div className="flex items-center gap-3">
-              <h3 className="text-xl font-bold text-slate-800">{product.name}</h3>
-              {onEdit && (
-                <button 
-                  onClick={() => onEdit(product)}
-                  className="flex items-center gap-1.5 px-3 py-1 bg-white border border-slate-200 rounded text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors shadow-sm"
-                >
-                  <Edit3 size={14} /> Sửa
-                </button>
-              )}
-            </div>
+            <h3 className="text-xl font-bold text-slate-800">{product.name}</h3>
             <p className="text-sm font-medium text-blue-600 mt-1">Mã: {product.id}</p>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
@@ -140,122 +130,135 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
         </div>
 
         <div className="p-4 md:p-6 overflow-y-auto flex-1">
-          {product.image && (
-            <div className="mb-4 flex justify-center">
-              <div className="w-full max-w-[180px] aspect-square rounded-2xl overflow-hidden border border-slate-100 shadow-sm">
-                <img src={product.image} alt={product.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-              </div>
-            </div>
-          )}
-
-          {/* Condensed Primary Info Grid */}
-          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 mb-6">
-            <div className="bg-[#f0fff4] px-3 py-2 rounded-lg border border-[#dcfce7] flex flex-col justify-center">
-              <span className="text-[9px] font-bold text-emerald-600 uppercase tracking-widest mb-0.5">Tồn kho</span>
-              <p className="text-base font-black text-emerald-700 leading-none truncate">
-                {product.isService ? '---' : product.stock}
-              </p>
-            </div>
-            
-            <div className="bg-[#f0f7ff] px-3 py-2 rounded-lg border border-[#dbeafe] flex flex-col justify-center">
-              <span className="text-[9px] font-bold text-blue-600 uppercase tracking-widest mb-0.5">Giá bán</span>
-              <p className="text-base font-black text-blue-700 leading-none truncate">
-                {formatNumber(product.price)}<span className="text-[10px] ml-0.5">đ</span>
-              </p>
-            </div>
-
-            <div className="bg-[#f0fdfa] px-3 py-2 rounded-lg border border-[#ccfbf1] flex flex-col justify-center">
-              <span className="text-[9px] font-bold text-teal-600 uppercase tracking-widest mb-0.5">Tổng nhập</span>
-              <p className="text-base font-black text-teal-700 leading-none truncate">
-                {stockStats.totalIn}
-              </p>
-            </div>
-
-            <div className="bg-[#fff5f5] px-3 py-2 rounded-lg border border-[#fee2e2] flex flex-col justify-center">
-              <span className="text-[9px] font-bold text-rose-600 uppercase tracking-widest mb-0.5">Tổng bán</span>
-              <p className="text-base font-black text-rose-700 leading-none truncate">
-                {stockStats.totalOut}
-              </p>
-            </div>
-
-            <div className="bg-[#fffaf0] px-3 py-2 rounded-lg border border-[#ffedd5] flex flex-col justify-center">
-              <span className="text-[9px] font-bold text-orange-600 uppercase tracking-widest mb-0.5">Bảo hành</span>
-              <p className="text-sm font-black text-orange-700 leading-none truncate">
-                {product.warrantyMonths ? `${product.warrantyMonths} Tháng` : '---'}
-              </p>
-            </div>
-
-            <div className="bg-slate-50 px-3 py-2 rounded-lg border border-slate-100 flex flex-col justify-center">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Đơn vị</span>
-              <p className="text-sm font-black text-slate-700 leading-none truncate">
-                {product.unit || '---'}
-              </p>
-            </div>
-
-            <div className="bg-slate-50 px-3 py-2 rounded-lg border border-slate-100 flex flex-col justify-center">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Nhóm hàng</span>
-              <p className="text-sm font-black text-slate-700 leading-none truncate">
-                {product.category || '---'}
-              </p>
-            </div>
-
-            <div className="bg-slate-50 px-3 py-2 rounded-lg border border-slate-100 flex flex-col justify-center">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Thương hiệu</span>
-              <p className="text-sm font-black text-slate-700 leading-none truncate">
-                {product.brand || '---'}
-              </p>
-            </div>
-
-            <div className="bg-slate-50 px-3 py-2 rounded-lg border border-slate-100 flex flex-col justify-center sm:col-span-2 md:col-span-1 lg:col-span-2">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Dự kiến hết</span>
-              <p className="text-sm font-black text-slate-700 leading-none truncate">
-                {product.expectedOutOfStock || '---'}
-              </p>
-            </div>
-          </div>
-
-          {/* Tabs - Only show if product has serial management */}
-          {product.hasSerial && (
-            <div className="flex bg-slate-100 p-1 rounded-lg mb-6">
-              <button 
-                onClick={() => setDetailTab('stock')}
-                className={`flex-1 py-2 text-sm font-bold rounded-md transition-all ${detailTab === 'stock' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}
-              >
-                Thẻ kho
-              </button>
+          {/* Main Tabs Navigation */}
+          <div className="flex bg-slate-100 p-1 rounded-xl mb-6">
+            <button 
+              onClick={() => setDetailTab('info')}
+              className={`flex-1 py-2.5 text-xs font-black rounded-lg transition-all ${detailTab === 'info' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Thông tin
+            </button>
+            <button 
+              onClick={() => setDetailTab('stock')}
+              className={`flex-1 py-2.5 text-xs font-black rounded-lg transition-all ${detailTab === 'stock' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Thẻ kho
+            </button>
+            {product.hasSerial && (
               <button 
                 onClick={() => setDetailTab('serial')}
-                className={`flex-1 py-2 text-sm font-bold rounded-md transition-all ${detailTab === 'serial' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}
+                className={`flex-1 py-2.5 text-xs font-black rounded-lg transition-all ${detailTab === 'serial' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
                 Danh sách Serial
               </button>
-            </div>
-          )}
-          
-          <div className="space-y-4">
-            {(detailTab === 'stock' || !product.hasSerial) ? (
+            )}
+          </div>
+
+          <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+            {detailTab === 'info' && (
+              <div className="flex flex-col md:flex-row gap-6 mb-2">
+                {/* Image section */}
+                <div className="shrink-0 flex justify-center md:block">
+                  <div className="w-32 h-32 md:w-64 md:h-64 rounded-2xl overflow-hidden border border-slate-100 shadow-sm bg-slate-50 flex items-center justify-center">
+                    {product.image ? (
+                      <img src={product.image} alt={product.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      <ImageIcon className="text-slate-300" size={48} />
+                    )}
+                  </div>
+                </div>
+
+                {/* Basic Info Grid */}
+                <div className="flex-1 grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div className="bg-[#f0fff4] px-4 py-3 rounded-xl border border-[#dcfce7] flex flex-col justify-center">
+                    <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-1">Tồn kho</span>
+                    <p className="text-xl font-black text-emerald-700 leading-none truncate">
+                      {product.isService ? '---' : product.stock}
+                    </p>
+                  </div>
+                  
+                  <div className="bg-[#f0f7ff] px-4 py-3 rounded-xl border border-[#dbeafe] flex flex-col justify-center">
+                    <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-1">Giá bán</span>
+                    <p className="text-xl font-black text-blue-700 leading-none truncate">
+                      {formatNumber(product.price)}<span className="text-xs ml-0.5">đ</span>
+                    </p>
+                  </div>
+
+                  <div className="bg-[#fffaf0] px-4 py-3 rounded-xl border border-[#ffedd5] flex flex-col justify-center">
+                    <span className="text-[10px] font-bold text-orange-600 uppercase tracking-widest mb-1">Bảo hành</span>
+                    <p className="text-sm font-black text-orange-700 leading-none truncate">
+                      {product.warrantyMonths ? `${product.warrantyMonths} Tháng` : '---'}
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 px-4 py-3 rounded-xl border border-slate-100 flex flex-col justify-center">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Đơn vị tính</span>
+                    <p className="text-sm font-black text-slate-700 leading-none truncate">
+                      {product.unit || '---'}
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 px-4 py-3 rounded-xl border border-slate-100 flex flex-col justify-center">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Nhóm hàng</span>
+                    <p className="text-sm font-black text-slate-700 leading-none truncate">
+                      {product.category || '---'}
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 px-4 py-3 rounded-xl border border-slate-100 flex flex-col justify-center">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Thương hiệu</span>
+                    <p className="text-sm font-black text-slate-700 leading-none truncate">
+                      {product.brand || '---'}
+                    </p>
+                  </div>
+
+                  <div className="bg-[#f0fdfa] px-4 py-3 rounded-xl border border-[#ccfbf1] flex flex-col justify-center">
+                    <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest mb-1">Tổng nhập</span>
+                    <p className="text-base font-black text-teal-700 leading-none truncate">
+                      {stockStats.totalIn}
+                    </p>
+                  </div>
+
+                  <div className="bg-[#fff5f5] px-4 py-3 rounded-xl border border-[#fee2e2] flex flex-col justify-center">
+                    <span className="text-[10px] font-bold text-rose-600 uppercase tracking-widest mb-1">Tổng bán</span>
+                    <p className="text-base font-black text-rose-700 leading-none truncate">
+                      {stockStats.totalOut}
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 px-4 py-3 rounded-xl border border-slate-100 flex flex-col justify-center">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Dự kiến hết</span>
+                    <p className="text-sm font-black text-slate-700 leading-none truncate">
+                      {product.expectedOutOfStock || '---'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {detailTab === 'stock' && (
               <div key="stock-tab" className="space-y-4">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
-            <div className="bg-white p-1 rounded-lg border border-slate-200 w-full md:w-auto flex">
-              <button 
-                onClick={() => setStockFilter('ALL')}
-                className={`flex-1 md:flex-none px-4 py-1.5 text-xs font-semibold rounded-md transition-all ${stockFilter === 'ALL' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
-              >
-                Tất cả
-              </button>
-              <button 
-                onClick={() => setStockFilter('IN')}
-                className={`flex-1 md:flex-none px-4 py-1.5 text-xs font-semibold rounded-md transition-all ${stockFilter === 'IN' ? 'bg-green-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
-              >
-                Nhập hàng
-              </button>
-              <button 
-                onClick={() => setStockFilter('OUT')}
-                className={`flex-1 md:flex-none px-4 py-1.5 text-xs font-semibold rounded-md transition-all ${stockFilter === 'OUT' ? 'bg-red-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
-              >
-                Đã bán
-              </button>
-            </div>
+                  <div className="bg-white p-1 rounded-lg border border-slate-200 w-full md:w-auto flex">
+                    <button 
+                      onClick={() => setStockFilter('ALL')}
+                      className={`flex-1 md:flex-none px-4 py-1.5 text-xs font-semibold rounded-md transition-all ${stockFilter === 'ALL' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      Tất cả
+                    </button>
+                    <button 
+                      onClick={() => setStockFilter('IN')}
+                      className={`flex-1 md:flex-none px-4 py-1.5 text-xs font-semibold rounded-md transition-all ${stockFilter === 'IN' ? 'bg-green-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      Nhập hàng
+                    </button>
+                    <button 
+                      onClick={() => setStockFilter('OUT')}
+                      className={`flex-1 md:flex-none px-4 py-1.5 text-xs font-semibold rounded-md transition-all ${stockFilter === 'OUT' ? 'bg-red-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      Đã bán
+                    </button>
+                  </div>
                 </div>
 
                 {filteredHistory.length === 0 ? (
@@ -292,9 +295,11 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   ))
                 )}
               </div>
-            ) : (
+            )}
+
+            {detailTab === 'serial' && product.hasSerial && (
               <div key="serial-tab" className="space-y-4">
-                <div className="flex flex-col md:flex-row gap-3 mb-4">
+                <div className="flex flex-col md:flex-row gap-3">
                   <div className="flex-1 relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                     <input 
@@ -398,10 +403,18 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           </div>
         </div>
         
-        <div className="p-4 md:p-6 border-t border-slate-100 bg-slate-50/50 shrink-0">
+        <div className="p-4 md:p-6 border-t border-slate-100 bg-slate-50/50 shrink-0 flex gap-4">
+          {onEdit && (
+            <button 
+              onClick={() => onEdit(product)}
+              className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl uppercase text-xs tracking-widest hover:bg-blue-700 transition-colors shadow-lg shadow-blue-100 flex items-center justify-center gap-2"
+            >
+              <Edit3 size={16} /> Sửa mặt hàng
+            </button>
+          )}
           <button 
             onClick={onClose}
-            className="w-full py-3 bg-[#991b1b] text-white font-black rounded-lg uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors shadow-lg shadow-red-100"
+            className="flex-1 py-3 bg-red-600 text-white font-black rounded-xl uppercase text-xs tracking-widest hover:bg-red-700 transition-colors shadow-lg shadow-red-100"
           >
             Đóng
           </button>

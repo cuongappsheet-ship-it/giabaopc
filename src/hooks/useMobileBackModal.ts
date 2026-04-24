@@ -5,6 +5,8 @@ if (!window.__modalStack) {
   window.__modalStack = [];
 }
 
+let isProgrammaticBack = false;
+
 declare global {
   interface Window {
     __modalStack: { id: string; close: () => void }[];
@@ -14,6 +16,11 @@ declare global {
 // Global popstate handler (runs only once per navigation)
 if (!window.__popStateHandlerRegistered) {
   window.addEventListener('popstate', (e) => {
+    if (isProgrammaticBack) {
+      isProgrammaticBack = false;
+      return;
+    }
+    
     const stack = window.__modalStack;
     if (stack && stack.length > 0) {
       const topModal = stack.pop(); // Remove it from stack
@@ -61,6 +68,7 @@ export const useMobileBackModal = (isOpen: boolean, onClose: () => void) => {
         
         // If it was closed via UI (not via back button), we clean up history
         if (window.history.state?.__modalId === modalId) {
+          isProgrammaticBack = true;
           window.history.back();
         }
       }

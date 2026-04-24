@@ -10,12 +10,16 @@ export const PrintSettings: React.FC = () => {
   const [isSaved, setIsSaved] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  const handleSave = async () => {
+  const handleSave = () => {
     setIsSaving(true);
-    await updatePrintSettings(settings);
-    setIsSaving(false);
-    setIsSaved(true);
-    setTimeout(() => setIsSaved(false), 3000);
+    updatePrintSettings(settings);
+    
+    // Simulate a brief local "saving" state for visual feedback
+    setTimeout(() => {
+      setIsSaving(false);
+      setIsSaved(true);
+      setTimeout(() => setIsSaved(false), 3000);
+    }, 300);
   };
 
   return (

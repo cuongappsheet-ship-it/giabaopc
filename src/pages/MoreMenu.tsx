@@ -20,7 +20,9 @@ import {
   ShieldCheck, 
   Package,
   Info,
-  LogOut
+  LogOut,
+  Database,
+  Send
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { useNavigate } from 'react-router-dom';
@@ -49,12 +51,14 @@ export const MoreMenu: React.FC = () => {
       title: 'Hàng hoá',
       items: [
         { label: 'Hàng hoá', icon: <Box className="text-blue-500" />, path: '/inventory' },
+        { label: 'External Serial', icon: <Database className="text-blue-500" />, path: '/external-serials' },
         { label: 'Kiểm kho', icon: <CheckCircle className="text-blue-500" />, path: '#' },
         { label: 'Nhập hàng', icon: <History className="text-blue-500" />, path: '/import-history' },
         { label: 'Trả hàng nhập', icon: <ArrowLeftRight className="text-blue-500" />, path: '/return-import' },
         { label: 'Chuyển hàng', icon: <Truck className="text-blue-500" />, path: '#' },
         { label: 'Xuất hủy', icon: <Trash2 className="text-blue-500" />, path: '#' },
         { label: 'Phiếu bảo hành', icon: <ShieldCheck className="text-blue-500" />, path: '/maintenance' },
+        { label: 'Công việc', icon: <ClipboardList className="text-blue-500" />, path: '/tasks' },
         { label: 'Xuất dùng nội bộ', icon: <Package className="text-blue-500" />, path: '#' },
       ]
     },
@@ -62,7 +66,7 @@ export const MoreMenu: React.FC = () => {
       title: 'Cấu hình',
       items: [
         { label: 'Cài đặt bản in', icon: <Printer className="text-blue-500" />, path: '/print-settings' },
-        { label: 'Bảng giá', icon: <Pencil className="text-blue-500" />, path: '/price-settings' },
+        { label: 'Cấu hình Telegram', icon: <Send className="text-blue-500" />, path: '/telegram-settings' },
         { label: 'Quản lý nhân viên', icon: <User className="text-blue-500" />, path: '/users' },
       ]
     }

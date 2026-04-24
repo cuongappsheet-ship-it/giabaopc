@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Search, Plus, UserPlus, UserCircle, CheckCircle, X, Trash2, Printer, Barcode, ChevronDown, Edit3, PieChart, ShoppingCart, Tag, Image as ImageIcon, ArrowLeft, Info, FileText, Wallet } from 'lucide-react';
+import { Search, Plus, UserPlus, UserCircle, CheckCircle, Check, X, Trash2, Printer, Barcode, ChevronDown, Edit3, PieChart, ShoppingCart, Tag, Image as ImageIcon, ArrowLeft, Info, FileText, Wallet } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { Product, InvoiceItem, Customer, CashTransaction } from '../types';
 import { formatNumber, parseFormattedNumber } from '../lib/utils';
@@ -10,11 +10,12 @@ import { PrintTemplate } from '../components/PrintTemplate';
 import { ProductDetailModal } from '../components/ProductDetailModal';
 import { useScrollLock } from '../hooks/useScrollLock';
 import { useMobileBackModal } from '../hooks/useMobileBackModal';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 export const POS: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { products, customers, invoices, cashTransactions, addInvoice, updateInvoice, deleteInvoice, addCustomer, updateProduct, serials, addStockCard, addCashTransaction, posDraft, setPOSDraft, returnSalesOrders } = useAppContext();
+  const { products, customers, invoices, cashTransactions, addInvoice, updateInvoice, deleteInvoice, addCustomer, updateProduct, serials, addStockCard, addCashTransaction, posDraft, setPOSDraft, returnSalesOrders, tasks, updateTask } = useAppContext();
   const [searchTerm, setSearchTerm] = useState('');
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
   
@@ -24,8 +25,11 @@ export const POS: React.FC = () => {
   const [tabs, setTabs] = useState(() => {
     // Check if we are editing an invoice passed via location state
     const editInvoice = location.state?.editInvoice;
+    const now = new Date();
+    const defaultDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}T${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
     if (editInvoice) {
-      // Map invoice items to POS items format
+      // ... same mapping ...
       const cartItems = editInvoice.items.map((item: any) => {
         const prod = products.find(p => p.id === item.id);
         return {
@@ -41,6 +45,15 @@ export const POS: React.FC = () => {
 
       const customer = customers.find(c => c.name === editInvoice.customer);
 
+      // Parse invoice date to datetime-local format if possible
+      let invoiceDate = defaultDate;
+      try {
+        // format is "12:32:02 22/4/2026" or similar
+        const [time, datePart] = editInvoice.date.split(' ');
+        const [d, m, y] = datePart.split('/');
+        invoiceDate = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}T${time.substring(0, 5)}`;
+      } catch (e) {}
+
       return [{
         id: Date.now(),
         name: `Sửa ${editInvoice.id}`,
@@ -50,6 +63,7 @@ export const POS: React.FC = () => {
         selectedCustomer: customer || { id: 'temp', name: editInvoice.customer, phone: editInvoice.phone || '' },
         note: editInvoice.note || '',
         paymentMethod: 'CASH',
+        date: invoiceDate,
         editingInvoiceId: editInvoice.id // Track that we are editing this invoice
       }];
     }
@@ -65,7 +79,9 @@ export const POS: React.FC = () => {
       paid: '' as string,
       selectedCustomer: null as Customer | null,
       note: '',
-      paymentMethod: 'CASH' as 'CASH' | 'TRANSFER' | 'CARD' | 'WALLET'
+      paymentMethod: 'CASH' as 'CASH' | 'TRANSFER' | 'CARD' | 'WALLET',
+      date: defaultDate,
+      taskId: undefined as string | undefined
     }];
   });
   const [activeTab, setActiveTab] = useState(posDraft?.activeTab || 0);
@@ -75,9 +91,28 @@ export const POS: React.FC = () => {
     setPOSDraft({ activeTab, tabs });
   }, [activeTab, tabs]);
 
+  // Handle URL params for pre-filling customer
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const customerId = params.get('customerId');
+    const taskId = params.get('taskId');
+    if (customerId && customers.length > 0) {
+      const customer = customers.find(c => c.id === customerId);
+      if (customer) {
+        updateCurrentTab({ 
+          selectedCustomer: customer, 
+          note: taskId ? `Thực hiện cho CV #${taskId}` : note,
+          taskId: taskId || undefined 
+        });
+        // Clear param from URL without reloading
+        window.history.replaceState(null, '', '/pos');
+      }
+    }
+  }, [location.search, customers]);
+
   // Current tab helper
   const currentTab = tabs[activeTab] || tabs[0];
-  const { cart, discount, paid, selectedCustomer, note, paymentMethod, editingInvoiceId } = currentTab;
+  const { cart, discount, paid, selectedCustomer, note, paymentMethod, editingInvoiceId, date, taskId: tabTaskId } = currentTab;
 
   // Setters for current tab
   const updateCurrentTab = (updates: Partial<typeof currentTab>) => {
@@ -94,6 +129,7 @@ export const POS: React.FC = () => {
   const setSelectedCustomer = (val: Customer | null) => updateCurrentTab({ selectedCustomer: val });
   const setNote = (val: string) => updateCurrentTab({ note: val });
   const setPaymentMethod = (val: 'CASH' | 'TRANSFER' | 'CARD' | 'WALLET') => updateCurrentTab({ paymentMethod: val });
+  const setTransactionDate = (val: string) => updateCurrentTab({ date: val });
 
   // Modals
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
@@ -108,40 +144,90 @@ export const POS: React.FC = () => {
   // Quick Add Form State
   const [quickAddName, setQuickAddName] = useState('');
   const [quickAddPrice, setQuickAddPrice] = useState('');
+  const [quickAddId, setQuickAddId] = useState('');
+  const [quickAddCost, setQuickAddCost] = useState('');
+  const [quickAddStock, setQuickAddStock] = useState('');
+  const [quickAddIsService, setQuickAddIsService] = useState(false);
+  const [quickAddHasSerial, setQuickAddHasSerial] = useState(false);
 
   const { addProduct } = useAppContext();
 
+  const hasQuickAddChanges = () => {
+    return (
+      quickAddName !== '' ||
+      quickAddPrice !== '' ||
+      quickAddId !== '' ||
+      quickAddCost !== '' ||
+      quickAddStock !== '0' ||
+      quickAddIsService !== false ||
+      quickAddHasSerial !== false
+    );
+  };
+
+  const handleCloseQuickAddModal = () => {
+    if (hasQuickAddChanges()) {
+      if (window.confirm('Bạn có thay đổi chưa lưu. Bạn có chắc chắn muốn đóng mà không lưu không?')) {
+        setIsQuickAddModalOpen(false);
+        resetQuickAddForm();
+      }
+    } else {
+      setIsQuickAddModalOpen(false);
+      resetQuickAddForm();
+    }
+  };
+
+  const resetQuickAddForm = () => {
+    setQuickAddName('');
+    setQuickAddPrice('');
+    setQuickAddId('');
+    setQuickAddCost('');
+    setQuickAddStock('');
+    setQuickAddIsService(false);
+    setQuickAddHasSerial(false);
+  };
+
   const handleQuickAdd = () => {
-    if (!quickAddName || !quickAddPrice) return alert('Vui lòng nhập tên và giá!');
+    if (!quickAddName || !quickAddPrice) return alert('Vui lòng nhập tên và giá bán!');
+    if (!quickAddIsService && !quickAddHasSerial && !quickAddStock) return alert('Vui lòng nhập số lượng tồn kho!');
     
-    const id = 'P' + Date.now().toString().slice(-4);
+    const id = quickAddId.trim() || ('P' + Date.now().toString().slice(-4));
     const newProduct: Product = {
       id,
       name: quickAddName,
       price: parseFormattedNumber(quickAddPrice),
-      importPrice: 0,
-      stock: 0,
-      hasSerial: false,
-      isService: false,
+      importPrice: parseFormattedNumber(quickAddCost) || 0,
+      stock: quickAddIsService ? null : (Number(quickAddStock) || 0),
+      hasSerial: quickAddIsService ? false : quickAddHasSerial,
+      isService: quickAddIsService,
       color: 'bg-blue-600'
     };
     
     addProduct(newProduct);
     addToCart(newProduct);
     setIsQuickAddModalOpen(false);
-    setQuickAddName('');
-    setQuickAddPrice('');
+    resetQuickAddForm();
   };
   
   // Print State
   const [printData, setPrintData] = useState<any>(null);
   const [showSuccessModal, setShowSuccessModal] = useState<{id: string, total: number} | null>(null);
-
-  // Lock scroll for modals
-  useScrollLock(!!viewingProduct || isCustomerModalOpen || isSerialModalOpen || isQuickAddModalOpen || !!showSuccessModal);
   const [showDraftPrompt, setShowDraftPrompt] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [checkoutConfirmModal, setCheckoutConfirmModal] = useState<{isOpen: boolean, type: 'EDIT' | 'NORMAL'} | null>(null);
+
+  // Lock scroll for modals
+  useScrollLock(!!viewingProduct || isCustomerModalOpen || isSerialModalOpen || isQuickAddModalOpen || !!showSuccessModal || !!checkoutConfirmModal || isMobileCheckoutOpen);
+
+  // Handle Escape key to close modals in layers
+  useEscapeKey(() => setShowSuccessModal(null), !!showSuccessModal);
+  useEscapeKey(() => setCheckoutConfirmModal(null), !!checkoutConfirmModal);
+  useEscapeKey(() => setIsMobileCheckoutOpen(false), isMobileCheckoutOpen);
+  useEscapeKey(handleCloseQuickAddModal, isQuickAddModalOpen);
+  useEscapeKey(() => setIsSerialModalOpen(false), isSerialModalOpen);
+  useEscapeKey(() => setIsCustomerModalOpen(false), isCustomerModalOpen);
+  useEscapeKey(() => setViewingProduct(null), !!viewingProduct);
+  useEscapeKey(() => setIsMobileCustomerSearchOpen(false), isMobileCustomerSearchOpen);
+  useEscapeKey(() => setIsMobileProductSearchOpen(false), isMobileProductSearchOpen);
 
   useEffect(() => {
     if (posDraft?.tabs && posDraft.tabs.some(t => t.cart.length > 0)) {
@@ -184,6 +270,7 @@ export const POS: React.FC = () => {
   // Search results
   const [productSuggestions, setProductSuggestions] = useState<Product[]>([]);
   const [customerSuggestions, setCustomerSuggestions] = useState<Customer[]>([]);
+  const [customerSearchTerm, setCustomerSearchTerm] = useState('');
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -202,6 +289,7 @@ export const POS: React.FC = () => {
   }, [searchTerm, products]);
 
   const handleCustomerSearch = (val: string) => {
+    setCustomerSearchTerm(val);
     if (val.trim()) {
       const filtered = (customers || []).filter(c => 
         (c.name || '').toLowerCase().includes(val.toLowerCase()) || 
@@ -318,7 +406,11 @@ export const POS: React.FC = () => {
       
       const now = new Date();
       const invoiceId = currentTab.editingInvoiceId || generateId('HD', invoices);
-      const dateStr = now.toLocaleString('vi-VN');
+      
+      // Convert datetime-local value to visual format "HH:mm:ss dd/mm/yyyy"
+      const [y, m, d, hh, min] = date.split(/[-T:]/);
+      const dateStr = `${hh}:${min}:00 ${d}/${m}/${y}`;
+      
       const customerName = selectedCustomer ? selectedCustomer.name : 'Khách lẻ';
 
       const invoice = {
@@ -331,6 +423,8 @@ export const POS: React.FC = () => {
         paid: paidAmount,
         debt: debt < 0 ? Math.abs(debt) : 0,
         discount: discount,
+        note: note,
+        taskId: tabTaskId || undefined,
         items: cart.map(item => {
           const p = products.find(prod => prod.id === item.id);
           let warrantyExpiry = undefined;
@@ -397,6 +491,22 @@ export const POS: React.FC = () => {
       setCheckoutConfirmModal(null);
       
       setShowSuccessModal({ id: invoiceId, total: invoice.total });
+
+      // Cập nhật trạng thái công việc nếu có
+      const taskIdFromUrl = new URLSearchParams(window.location.search).get('taskId');
+      const finalTaskId = taskIdFromUrl || (note.startsWith('Thực hiện cho CV #') ? note.replace('Thực hiện cho CV #', '').split(' ')[0] : null);
+
+      if (finalTaskId) {
+        const task = tasks.find(t => t.id === finalTaskId);
+        if (task) {
+          updateTask(finalTaskId, { 
+            ...task, 
+            status: 'COMPLETED', 
+            completedAt: new Date().toLocaleString('vi-VN'),
+            purchaseId: invoiceId
+          });
+        }
+      }
     } catch (error) {
       console.error("Checkout failed:", error);
       alert("Thanh toán thất bại. Vui lòng thử lại.");
@@ -497,7 +607,7 @@ export const POS: React.FC = () => {
               <p className="text-xs text-slate-500 mb-3">Không tìm thấy sản phẩm "{searchTerm}"</p>
               <button 
                 onClick={() => {
-                  setQuickAddName(searchTerm);
+                  resetQuickAddForm();
                   setIsQuickAddModalOpen(true);
                   setSearchTerm('');
                 }}
@@ -711,6 +821,7 @@ export const POS: React.FC = () => {
                           onClick={() => {
                             setSelectedCustomer(c);
                             setCustomerSuggestions([]);
+                            setCustomerSearchTerm('');
                           }}
                           className="p-3 border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors flex justify-between items-center"
                         >
@@ -718,6 +829,25 @@ export const POS: React.FC = () => {
                           <span className="text-[10px] text-slate-500 font-bold">{c.phone}</span>
                         </div>
                       ))}
+                    </div>
+                  )}
+                  {customerSuggestions.length === 0 && customerSearchTerm.trim() !== '' && (
+                    <div className="absolute top-full left-0 right-0 z-[110] bg-white border border-slate-200 rounded-lg shadow-2xl mt-1 p-2">
+                       <button 
+                         className="w-full py-2 px-3 flex items-center justify-center gap-2 text-blue-600 bg-blue-50 border border-blue-100 rounded-lg hover:bg-blue-100 transition-colors text-xs font-bold"
+                         onClick={() => {
+                           setIsCustomerModalOpen(true);
+                           setTimeout(() => {
+                             const nameInput = document.getElementById('new-cust-name') as HTMLInputElement;
+                             const phoneInput = document.getElementById('new-cust-phone') as HTMLInputElement;
+                             if (nameInput && !/[\d]/.test(customerSearchTerm)) nameInput.value = customerSearchTerm;
+                             if (phoneInput && /[\d]/.test(customerSearchTerm)) phoneInput.value = customerSearchTerm;
+                           }, 50);
+                         }}
+                       >
+                         <Plus size={16} />
+                         Thêm mới "{customerSearchTerm}"
+                       </button>
                     </div>
                   )}
                 </div>
@@ -736,6 +866,15 @@ export const POS: React.FC = () => {
 
             {/* Pricing Details */}
             <div className="space-y-4 py-4 border-t border-slate-100">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-600 font-medium">Thời gian</span>
+                <input 
+                  type="datetime-local"
+                  value={date}
+                  onChange={(e) => setTransactionDate(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs font-bold outline-none focus:border-blue-500"
+                />
+              </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-slate-600 font-medium">Tổng tiền hàng</span>
                 <div className="flex items-center gap-4">
@@ -1164,6 +1303,7 @@ export const POS: React.FC = () => {
                 onClick={() => {
                   setSelectedCustomer(c);
                   setIsMobileCustomerSearchOpen(false);
+                  setMobileCustomerSearchTerm('');
                 }}
                 className="p-4 border-b border-slate-50 flex flex-col gap-1 cursor-pointer"
               >
@@ -1171,6 +1311,27 @@ export const POS: React.FC = () => {
                 <span className="text-xs text-slate-500">{c.phone}</span>
               </div>
             ))}
+            
+            {mobileCustomerSearchTerm.trim() && customers.filter(c => c.name.toLowerCase().includes(mobileCustomerSearchTerm.toLowerCase()) || c.phone.includes(mobileCustomerSearchTerm)).length === 0 && (
+              <div className="p-4 flex justify-center">
+                <button 
+                  className="w-full py-3 px-4 flex items-center justify-center gap-2 text-blue-600 bg-blue-50 border border-blue-100 rounded-lg hover:bg-blue-100 transition-colors text-sm font-bold"
+                  onClick={() => {
+                    setIsMobileCustomerSearchOpen(false);
+                    setIsCustomerModalOpen(true);
+                    setTimeout(() => {
+                      const nameInput = document.getElementById('new-cust-name') as HTMLInputElement;
+                      const phoneInput = document.getElementById('new-cust-phone') as HTMLInputElement;
+                      if (nameInput && !/[\d]/.test(mobileCustomerSearchTerm)) nameInput.value = mobileCustomerSearchTerm;
+                      if (phoneInput && /[\d]/.test(mobileCustomerSearchTerm)) phoneInput.value = mobileCustomerSearchTerm;
+                    }, 50);
+                  }}
+                >
+                  <Plus size={18} />
+                  Thêm mới "{mobileCustomerSearchTerm}"
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1225,7 +1386,7 @@ export const POS: React.FC = () => {
                 <p className="text-sm text-slate-500 mb-4">Không tìm thấy sản phẩm "{searchTerm}"</p>
                 <button 
                   onClick={() => {
-                    setQuickAddName(searchTerm);
+                    resetQuickAddForm();
                     setIsQuickAddModalOpen(true);
                     setIsMobileProductSearchOpen(false);
                     setSearchTerm('');
@@ -1296,7 +1457,7 @@ export const POS: React.FC = () => {
           <div className="bg-white w-full max-w-sm rounded-xl shadow-2xl overflow-hidden p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold text-slate-800 tracking-tight">Thêm nhanh sản phẩm</h3>
-              <button onClick={() => setIsQuickAddModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={handleCloseQuickAddModal} className="text-slate-400 hover:text-slate-600">
                 <X size={20} />
               </button>
             </div>
@@ -1311,17 +1472,87 @@ export const POS: React.FC = () => {
                   placeholder="Tên sản phẩm..." 
                 />
               </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Giá bán (đ)</label>
-                <NumericFormat 
-                  value={quickAddPrice}
-                  onValueChange={(values) => setQuickAddPrice(values.formattedValue)}
-                  thousandSeparator="."
-                  decimalSeparator=","
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none focus:border-blue-400" 
-                  placeholder="0" 
-                />
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Mã hàng hóa</label>
+                  <input 
+                    type="text" 
+                    value={quickAddId}
+                    onChange={(e) => setQuickAddId(e.target.value)}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none focus:border-blue-400" 
+                    placeholder="Tự động" 
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Loại hàng</label>
+                  <select 
+                    value={quickAddIsService ? 'service' : 'product'}
+                    onChange={(e) => setQuickAddIsService(e.target.value === 'service')}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none focus:border-blue-400"
+                  >
+                    <option value="product">Hàng hóa</option>
+                    <option value="service">Dịch vụ</option>
+                  </select>
+                </div>
               </div>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Giá bán</label>
+                  <NumericFormat 
+                    value={quickAddPrice}
+                    onValueChange={(values) => setQuickAddPrice(values.formattedValue)}
+                    thousandSeparator="."
+                    decimalSeparator=","
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none focus:border-blue-400" 
+                    placeholder="0" 
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Giá vốn</label>
+                  <NumericFormat 
+                    value={quickAddCost}
+                    onValueChange={(values) => setQuickAddCost(values.formattedValue)}
+                    thousandSeparator="."
+                    decimalSeparator=","
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none focus:border-blue-400" 
+                    placeholder="0" 
+                  />
+                </div>
+              </div>
+              
+              {!quickAddIsService && (
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Tồn kho ban đầu</label>
+                    <NumericFormat 
+                      value={quickAddStock}
+                      onValueChange={(values) => setQuickAddStock(values.formattedValue)}
+                      thousandSeparator="."
+                      decimalSeparator=","
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none focus:border-blue-400" 
+                      placeholder="0" 
+                      disabled={quickAddHasSerial}
+                    />
+                  </div>
+                  <div className="flex-1 flex flex-col justify-end pb-3">
+                    <label className="flex items-center gap-2 cursor-pointer group">
+                      <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${quickAddHasSerial ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300 group-hover:border-blue-400'}`}>
+                        {quickAddHasSerial && <Check size={14} />}
+                      </div>
+                      <input 
+                        type="checkbox" 
+                        className="hidden" 
+                        checked={quickAddHasSerial}
+                        onChange={(e) => {
+                          setQuickAddHasSerial(e.target.checked);
+                          if (e.target.checked) setQuickAddStock('0');
+                        }}
+                      />
+                      <span className="text-xs font-bold text-slate-700">Quản lý Serial/IMEI</span>
+                    </label>
+                  </div>
+                </div>
+              )}
               <button 
                 onClick={handleQuickAdd}
                 className="w-full bg-blue-600 text-white py-3.5 rounded-lg font-bold shadow-md hover:bg-blue-700 transition-all active:scale-95 mt-2"
@@ -1368,7 +1599,16 @@ export const POS: React.FC = () => {
             </div>
 
             {/* Payment Details */}
-            <div className="bg-white p-4 space-y-5 shadow-sm">
+            <div className="bg-white p-4 space-y-4 shadow-sm">
+              <div className="flex justify-between items-center bg-slate-50 p-2 rounded-lg border border-slate-100">
+                <span className="text-sm font-bold text-slate-800">Thời gian</span>
+                <input 
+                  type="datetime-local"
+                  value={date}
+                  onChange={(e) => setTransactionDate(e.target.value)}
+                  className="bg-white border border-slate-200 rounded px-2 py-1 text-xs font-bold outline-none focus:border-blue-500"
+                />
+              </div>
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-bold text-slate-800">Tổng tiền hàng</span>

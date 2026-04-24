@@ -58,7 +58,7 @@ export const ImportHistory: React.FC = () => {
   };
 
   const handlePrint = (order: ImportOrder) => {
-    const supplier = suppliers.find(s => s.name === order.supplier);
+    const supplier = (suppliers || []).find(s => s.name === order.supplier);
     setPrintData({
       title: 'PHIẾU NHẬP HÀNG',
       id: order.id,
@@ -80,7 +80,7 @@ export const ImportHistory: React.FC = () => {
   };
 
   const handleOpenOrder = (order: ImportOrder) => {
-    const supplier = suppliers.find(s => s.name === order.supplier);
+    const supplier = (suppliers || []).find(s => s.name === order.supplier);
     setImportDraft({
       cart: order.items.map(item => ({
         ...item,
@@ -91,7 +91,8 @@ export const ImportHistory: React.FC = () => {
         note: ''
       })),
       selectedSupplier: supplier || { id: '', name: order.supplier, phone: '' },
-      paid: order.paid
+      paid: order.paid,
+      isExplicitIntent: true
     });
     navigate('/import');
   };
@@ -172,7 +173,7 @@ export const ImportHistory: React.FC = () => {
                     <td className="py-4 px-4">
                       <div className="flex items-center gap-2">
                         <Star className="text-slate-300 hover:text-yellow-400 cursor-pointer transition-colors" size={16} />
-                        <span className="font-bold text-indigo-600 uppercase group-hover:underline">{order.id}</span>
+                        <span className="font-bold text-indigo-600 uppercase">{order.id}</span>
                       </div>
                     </td>
                     <td className="py-4 px-4 text-xs text-slate-500 font-medium">{order.date}</td>

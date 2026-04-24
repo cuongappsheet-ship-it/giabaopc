@@ -23,13 +23,25 @@ import { CreateReturnSales } from './pages/CreateReturnSales';
 import { Reports } from './pages/Reports';
 import { CashLedger } from './pages/CashLedger';
 import { Maintenance } from './pages/Maintenance';
+import { Tasks } from './pages/Tasks';
 import { PriceSettings } from './pages/PriceSettings';
 import { PrintSettings } from './pages/PrintSettings';
+import { TelegramSettings } from './pages/TelegramSettings';
 import Users from './pages/Users';
 import { MoreMenu } from './pages/MoreMenu';
+import { requestNotificationPermission } from './lib/notification';
+
+import { ExternalSerials } from './pages/ExternalSerials';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { currentUser } = useAppContext();
+  
+  React.useEffect(() => {
+    if (currentUser) {
+      requestNotificationPermission();
+    }
+  }, [currentUser]);
+
   if (!currentUser) {
     return <Navigate to="/login" replace />;
   }
@@ -50,6 +62,7 @@ const AppRoutes = () => {
           <Route path="pos" element={<POS />} />
           <Route path="inventory" element={<Inventory />} />
           <Route path="invoices" element={<Invoices />} />
+          <Route path="external-serials" element={<ExternalSerials />} />
           <Route path="customers" element={<Customers />} />
           <Route path="suppliers" element={<Suppliers />} />
           <Route path="import" element={<Import />} />
@@ -61,8 +74,10 @@ const AppRoutes = () => {
           <Route path="reports" element={<Reports />} />
           <Route path="cash-ledger" element={<CashLedger />} />
           <Route path="maintenance" element={<Maintenance />} />
+          <Route path="tasks" element={<Tasks />} />
           <Route path="price-settings" element={<PriceSettings />} />
           <Route path="print-settings" element={<PrintSettings />} />
+          <Route path="telegram-settings" element={<TelegramSettings />} />
           <Route path="users" element={<Users />} />
           <Route path="more" element={<MoreMenu />} />
         </Route>

@@ -7,9 +7,12 @@ import { formatNumber, parseFormattedNumber } from '../lib/utils';
 import { generateId } from '../lib/idUtils';
 import { useScrollLock } from '../hooks/useScrollLock';
 import { useMobileBackModal } from '../hooks/useMobileBackModal';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 import { NumericFormat } from 'react-number-format';
 import { ProductDetailModal } from '../components/ProductDetailModal';
+import { ImageLibraryModal } from '../components/ImageLibraryModal';
+import { AnimatePresence } from 'motion/react';
 
 export const Inventory: React.FC = () => {
   const navigate = useNavigate();
@@ -36,7 +39,54 @@ export const Inventory: React.FC = () => {
   useMobileBackModal(!!viewingReturnSales, () => setViewingReturnSales(null));
   
   // Use scroll lock for all modals in Inventory
-  useScrollLock(isModalOpen || !!selectedProduct || !!viewingInvoice || !!viewingImport || !!viewingReturnImport || !!viewingReturnSales);
+  useScrollLock(isModalOpen || !!selectedProduct || !!viewingInvoice || !!viewingInvoice || !!viewingReturnImport || !!viewingReturnSales);
+
+  const hasChanges = () => {
+    if (selectedProduct) {
+      return (
+        name !== selectedProduct.name ||
+        pType !== (selectedProduct.isService ? 'service' : 'product') ||
+        parseFormattedNumber(price) !== selectedProduct.price ||
+        parseFormattedNumber(cost) !== (selectedProduct.importPrice || 0) ||
+        stock !== (selectedProduct.stock?.toString() || '') ||
+        hasSerial !== (selectedProduct.hasSerial || false) ||
+        warrantyMonths !== (selectedProduct.warrantyMonths?.toString() || '') ||
+        unit !== (selectedProduct.unit || '') ||
+        category !== (selectedProduct.category || '') ||
+        brand !== (selectedProduct.brand || '') ||
+        expectedOutOfStock !== (selectedProduct.expectedOutOfStock || '') ||
+        image !== selectedProduct.image
+      );
+    }
+    return (
+      name !== '' ||
+      price !== '' ||
+      cost !== '' ||
+      stock !== '' ||
+      unit !== '' ||
+      category !== '' ||
+      brand !== '' ||
+      image !== undefined
+    );
+  };
+
+  const handleCloseModal = () => {
+    if (hasChanges()) {
+      if (window.confirm('Bạn có thay đổi chưa lưu. Bạn có chắc chắn muốn đóng mà không lưu không?')) {
+        setIsModalOpen(false);
+      }
+    } else {
+      setIsModalOpen(false);
+    }
+  };
+
+  // Handle Escape key to close modals in layers
+  useEscapeKey(() => setViewingReturnSales(null), !!viewingReturnSales);
+  useEscapeKey(() => setViewingReturnImport(null), !!viewingReturnImport);
+  useEscapeKey(() => setViewingImport(null), !!viewingImport);
+  useEscapeKey(() => setViewingInvoice(null), !!viewingInvoice);
+  useEscapeKey(() => setSelectedProduct(null), !!selectedProduct);
+  useEscapeKey(handleCloseModal, isModalOpen);
 
   // Serial filtering state
   const [serialSearchTerm, setSerialSearchTerm] = useState('');
@@ -57,6 +107,7 @@ export const Inventory: React.FC = () => {
   const [brand, setBrand] = useState('');
   const [expectedOutOfStock, setExpectedOutOfStock] = useState('');
   const [image, setImage] = useState<string | undefined>(undefined);
+  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
@@ -77,6 +128,21 @@ export const Inventory: React.FC = () => {
   const startIndex = (currentPage - 1) * rowsPerPage;
   const endIndex = startIndex + rowsPerPage;
   const paginatedProducts = filteredProducts.slice(startIndex, endIndex);
+
+  const resetForm = () => {
+    setPType('product');
+    setName('');
+    setPrice('');
+    setCost('');
+    setStock('');
+    setHasSerial(false);
+    setWarrantyMonths('');
+    setUnit('');
+    setCategory('');
+    setBrand('');
+    setExpectedOutOfStock('');
+    setImage(undefined);
+  };
 
   const handleSave = () => {
     if (!name || !price) {
@@ -124,20 +190,32 @@ export const Inventory: React.FC = () => {
       });
     }
 
-    // Close and reset immediately for instant experience
+    // Close Edit Modal
     setIsModalOpen(false);
-    setSelectedProduct(null);
-    setName('');
-    setPrice('');
-    setCost('');
-    setStock('');
-    setHasSerial(false);
-    setWarrantyMonths('');
-    setUnit('');
-    setCategory('');
-    setBrand('');
-    setExpectedOutOfStock('');
-    setImage(undefined);
+
+    // If we're editing, update the selectedProduct state so the detail modal stays open with updated info
+    if (selectedProduct) {
+      setSelectedProduct({
+        ...selectedProduct,
+        name,
+        price: parseFormattedNumber(price),
+        importPrice: parseFormattedNumber(cost) || 0,
+        stock: pType === 'service' ? null : Number(stock) || 0,
+        hasSerial: pType === 'service' ? false : hasSerial,
+        isService: pType === 'service',
+        warrantyMonths: Number(warrantyMonths) || 0,
+        unit,
+        category,
+        brand,
+        expectedOutOfStock,
+        image
+      });
+    } else {
+      setSelectedProduct(null);
+    }
+
+    // Reset form
+    resetForm();
   };
 
   const productStockHistory = useMemo(() => {
@@ -237,7 +315,8 @@ export const Inventory: React.FC = () => {
         };
       }) as any,
       selectedSupplier: supplier,
-      paid: order.paid
+      paid: order.paid,
+      isExplicitIntent: true
     });
     navigate('/import');
   };
@@ -267,6 +346,7 @@ export const Inventory: React.FC = () => {
             <button 
               onClick={() => {
                 setSelectedProduct(null);
+                resetForm();
                 setIsModalOpen(true);
               }}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg shadow-sm flex items-center gap-2 font-bold text-sm hover:bg-blue-700 transition-all"
@@ -283,7 +363,7 @@ export const Inventory: React.FC = () => {
         <div className="hidden md:block flex-1">
           <table className="w-full border-collapse text-left">
             <thead className="sticky top-0 z-10 bg-white border-b border-slate-200">
-              <tr className="text-slate-700 text-[13px] font-bold">
+              <tr className="text-slate-700 text-sm font-bold">
                 <th className="p-3 w-10"><input type="checkbox" className="rounded border-slate-300" /></th>
                 <th className="p-3 w-10"></th>
                 <th className="p-3 w-12"></th>
@@ -368,13 +448,13 @@ export const Inventory: React.FC = () => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    {p.isService && <span className="bg-emerald-100 text-emerald-700 text-[8px] font-bold px-2 py-0.5 rounded">Dịch vụ</span>}
+                    {p.isService && <span className="bg-emerald-100 text-emerald-700 text-[9px] font-bold px-2 py-0.5 rounded">Dịch vụ</span>}
                   </div>
                   <p className="font-semibold text-sm text-slate-800 break-words leading-tight">{p.name}</p>
                   <p className="text-[10px] text-blue-600 font-semibold tracking-wide mt-1">{formatNumber(p.price)}đ</p>
                 </div>
                 <div className="text-right pl-3 border-l border-slate-100 shrink-0 min-w-[65px]">
-                  <p className="text-[8px] text-slate-400 font-bold tracking-widest mb-1">{p.isService ? 'Trạng thái' : 'Tồn kho'}</p>
+                  <p className="text-[9px] text-slate-400 font-bold tracking-widest mb-1">{p.isService ? 'Trạng thái' : 'Tồn kho'}</p>
                   <p className={`font-bold ${p.isService ? 'text-emerald-500 text-xs sm:text-sm' : 'text-slate-800 text-lg sm:text-xl'}`}>
                     {p.isService ? 'Sẵn sàng' : p.stock}
                   </p>
@@ -435,8 +515,8 @@ export const Inventory: React.FC = () => {
           onEdit={(p) => {
             setPType(p.isService ? 'service' : 'product');
             setName(p.name);
-            setPrice(formatNumber(p.price));
-            setCost(formatNumber(p.importPrice || 0));
+            setPrice(p.price.toString());
+            setCost((p.importPrice || 0).toString());
             setStock(p.stock?.toString() || '');
             setHasSerial(p.hasSerial || false);
             setWarrantyMonths(p.warrantyMonths?.toString() || '');
@@ -757,7 +837,7 @@ export const Inventory: React.FC = () => {
           <div className="bg-white w-full max-w-4xl md:rounded-xl rounded-none shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full md:max-h-[95vh]">
             <div className="flex justify-between items-center p-4 border-b border-slate-100 shrink-0">
               <h3 className="text-lg font-bold text-slate-800 tracking-tight">{selectedProduct ? 'Cập nhật mặt hàng' : 'Thêm mặt hàng'}</h3>
-              <button onClick={() => setIsModalOpen(false)} className="w-8 h-8 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-200 transition-colors flex items-center justify-center">
+              <button onClick={handleCloseModal} className="w-8 h-8 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-200 transition-colors flex items-center justify-center">
                 <X size={18} />
               </button>
             </div>
@@ -782,19 +862,25 @@ export const Inventory: React.FC = () => {
                 </div>
                 <div className="flex-1 space-y-3">
                   <p className="text-xs font-medium text-slate-500">Link ảnh sản phẩm</p>
-                  <div className="flex flex-col gap-2">
-                    <div className="relative">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="relative flex-1">
                       <input 
                         type="text"
                         value={image || ''}
                         onChange={(e) => setImage(e.target.value)}
-                        placeholder="Dán link ảnh tại đây (Google Drive, Imgur...)"
+                        placeholder="Dán link ảnh tại đây..."
                         className="w-full pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-400 shadow-sm"
                       />
                       <ExternalLink size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
                     </div>
+                    <button 
+                      onClick={() => setIsLibraryOpen(true)}
+                      className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
+                    >
+                      <ImageIcon size={14} /> Chọn ảnh
+                    </button>
                   </div>
-                  <p className="text-[10px] text-slate-400 italic">Nhập địa chỉ URL của ảnh. Khuyên dùng link ảnh từ Google Drive đã chia sẻ công khai.</p>
+                  <p className="text-[10px] text-slate-400 italic">Nhập địa chỉ URL hoặc chọn ảnh từ thư viện Drive.</p>
                 </div>
               </div>
 
@@ -829,7 +915,7 @@ export const Inventory: React.FC = () => {
                   <label className="text-xs font-medium text-slate-500 ml-1">Giá bán lẻ (đ)</label>
                   <NumericFormat 
                     value={price}
-                    onValueChange={(values) => setPrice(values.formattedValue)}
+                    onValueChange={(values) => setPrice(values.value)}
                     thousandSeparator="."
                     decimalSeparator=","
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm" 
@@ -840,7 +926,7 @@ export const Inventory: React.FC = () => {
                   <label className="text-xs font-medium text-slate-500 ml-1">Giá vốn (đ)</label>
                   <NumericFormat 
                     value={cost}
-                    onValueChange={(values) => setCost(values.formattedValue)}
+                    onValueChange={(values) => setCost(values.value)}
                     thousandSeparator="."
                     decimalSeparator=","
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-blue-600 outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm" 
@@ -948,7 +1034,7 @@ export const Inventory: React.FC = () => {
                 )}
               </button>
               <button 
-                onClick={() => setIsModalOpen(false)}
+                onClick={handleCloseModal}
                 className="flex-1 py-3 md:py-4 bg-[#991b1b] text-white font-black rounded-lg uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors active:scale-95"
               >
                 Đóng
@@ -962,12 +1048,25 @@ export const Inventory: React.FC = () => {
       <button 
         onClick={() => {
           setSelectedProduct(null);
+          resetForm();
           setIsModalOpen(true);
         }}
         className="md:hidden fixed bottom-24 right-4 w-14 h-14 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg shadow-blue-200 z-40 active:scale-95 transition-transform"
       >
         <Plus size={24} />
       </button>
+
+      <AnimatePresence>
+        {isLibraryOpen && (
+          <ImageLibraryModal 
+            onClose={() => setIsLibraryOpen(false)}
+            onSelect={(url) => {
+              setImage(url);
+              setIsLibraryOpen(false);
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };

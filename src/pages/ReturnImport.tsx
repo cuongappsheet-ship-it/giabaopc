@@ -58,17 +58,11 @@ export const ReturnImport: React.FC = () => {
         <div className="flex items-center gap-2">
           <button 
             onClick={() => navigate('/create-return-import')}
-            className="px-4 py-2 bg-white border border-blue-600 text-blue-600 rounded-lg shadow-sm flex items-center gap-2 font-bold text-sm hover:bg-blue-50 transition-all"
+            className="hidden md:flex px-4 py-2 bg-white border border-blue-600 text-blue-600 rounded-lg shadow-sm items-center gap-2 font-bold text-sm hover:bg-blue-50 transition-all"
           >
             <Plus size={18} /> Trả hàng nhập
           </button>
           
-          <div className="relative group">
-            <button className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg shadow-sm flex items-center gap-2 font-bold text-sm hover:bg-slate-50 transition-all">
-              <FileText size={18} /> Xuất file <ChevronDown size={16} />
-            </button>
-          </div>
-
           <div className="hidden md:flex items-center gap-1 border-l border-slate-200 pl-3 ml-1">
             <button className="p-2 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-lg transition-all">
               <LayoutGrid size={20} />
@@ -300,6 +294,13 @@ export const ReturnImport: React.FC = () => {
           </div>
         </div>
       )}
+      {/* Mobile FAB for Add */}
+      <button 
+        onClick={() => navigate('/create-return-import')}
+        className="md:hidden fixed bottom-24 right-4 w-14 h-14 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg shadow-blue-200 z-40 active:scale-95 transition-transform"
+      >
+        <Plus size={24} />
+      </button>
     </div>
   );
 };

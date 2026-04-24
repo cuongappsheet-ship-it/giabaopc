@@ -9,6 +9,7 @@ import { generateId } from '../lib/idUtils';
 import { apiService } from '../services/api';
 import { useScrollLock } from '../hooks/useScrollLock';
 import { useMobileBackModal } from '../hooks/useMobileBackModal';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 const toYMD = (dateStr: string | undefined | null) => {
   if (!dateStr) return '';
@@ -39,7 +40,7 @@ const toDMY = (dateStr: string | undefined | null) => {
 };
 
 export const Maintenance: React.FC = () => {
-  const { maintenanceRecords, addMaintenanceRecord, updateMaintenanceRecord, maintenanceTransfers, addMaintenanceTransfer, updateMaintenanceTransfer, customers, addCustomer, suppliers, addSupplier, invoices, externalSerials, addExternalSerial, currentUser, addInvoice, products, serials, updateProduct, returnSalesOrders } = useAppContext();
+  const { maintenanceRecords, addMaintenanceRecord, updateMaintenanceRecord, maintenanceTransfers, addMaintenanceTransfer, updateMaintenanceTransfer, customers, addCustomer, suppliers, addSupplier, invoices, externalSerials, addExternalSerial, currentUser, addInvoice, products, serials, updateProduct, returnSalesOrders, tasks, updateTask } = useAppContext();
   const location = useLocation();
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
@@ -48,12 +49,36 @@ export const Maintenance: React.FC = () => {
   const [selectedRecord, setSelectedRecord] = useState<MaintenanceRecord | null>(null);
   const [selectedInvoiceForDetail, setSelectedInvoiceForDetail] = useState<Invoice | null>(null);
 
+  // Handle Escape key to close modals in layers
+  useEscapeKey(() => setSelectedInvoiceForDetail(null), !!selectedInvoiceForDetail);
+  useEscapeKey(() => setSelectedRecord(null), !!selectedRecord);
+  useEscapeKey(() => { setIsModalOpen(false); resetForm(); }, isModalOpen);
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
+    const taskId = params.get('taskId');
     if (params.get('type') === 'repair') {
       setIsModalOpen(true);
+      
+      if (taskId) {
+        setNote(`Thực hiện cho CV #${taskId}`);
+        setTaskIdFromUrlState(taskId);
+      }
+      
+      const cid = params.get('customerId');
+      if (cid && customers.length > 0) {
+        const customer = customers.find(c => c.id === cid);
+        if (customer) {
+          setSelectedCustomerObj(customer);
+          setCustomerName(customer.name);
+          setCustomerPhone(customer.phone);
+          setCustomerAddress(customer.address || '');
+        }
+      }
+      // Clear URL params without reload
+      window.history.replaceState(null, '', '/maintenance');
     }
-  }, [location.search]);
+  }, [location.search, customers]);
 
   // Form state
   const [customerName, setCustomerName] = useState('');
@@ -70,6 +95,7 @@ export const Maintenance: React.FC = () => {
   const [feedbackText, setFeedbackText] = useState('');
   const [isEditingRecord, setIsEditingRecord] = useState(false);
   const [editRecordData, setEditRecordData] = useState<Partial<MaintenanceRecord>>({});
+  const [taskIdFromUrlState, setTaskIdFromUrlState] = useState<string | null>(null);
 
   const [deviceSource, setDeviceSource] = useState<'STORE'|'EXTERNAL'>('STORE');
   const [customerSuggestions, setCustomerSuggestions] = useState<any[]>([]);
@@ -232,6 +258,7 @@ export const Maintenance: React.FC = () => {
 
     const now = new Date();
     const id = generateId('BH', maintenanceRecords);
+    const finalTaskId = taskIdFromUrlState || (note.startsWith('Thực hiện cho CV #') ? note.replace('Thực hiện cho CV #', '').split(' ')[0] : null);
     
     let warrantyInfo = 'Ngoài bảo hành';
     if (deviceWarrantyStatus && !deviceWarrantyStatus.isExpired && deviceWarrantyStatus.days > 0) {
@@ -249,8 +276,21 @@ export const Maintenance: React.FC = () => {
       status: 'RECEIVING',
       cost: parseFormattedNumber(cost) || 0,
       note,
-      warrantyRemainingInfo: warrantyInfo
+      warrantyRemainingInfo: warrantyInfo,
+      taskId: finalTaskId || undefined
     });
+
+    if (finalTaskId) {
+      const task = tasks.find(t => t.id === finalTaskId);
+      if (task) {
+        updateTask(finalTaskId, { 
+          ...task, 
+          status: 'COMPLETED',
+          completedAt: now.toLocaleString('vi-VN'),
+          repairId: id
+        });
+      }
+    }
 
     setIsModalOpen(false);
     resetForm();

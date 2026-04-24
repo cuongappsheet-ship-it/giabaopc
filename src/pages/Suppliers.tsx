@@ -18,6 +18,7 @@ export const Suppliers: React.FC = () => {
   
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
 
   // Print State
   const [printData, setPrintData] = useState<any>(null);
@@ -61,10 +62,11 @@ export const Suppliers: React.FC = () => {
       alert("Vui lòng nhập đủ tên và số điện thoại");
       return;
     }
-    addSupplier({ name, phone });
+    addSupplier({ name, phone, address });
     setIsModalOpen(false);
     setName('');
     setPhone('');
+    setAddress('');
   };
 
   const getSupplierStats = (supplierName: string) => {
@@ -174,7 +176,8 @@ export const Suppliers: React.FC = () => {
         note: ''
       })),
       selectedSupplier: supplier || { id: '', name: order.supplier, phone: '' },
-      paid: order.paid
+      paid: order.paid,
+      isExplicitIntent: true
     });
     navigate('/import');
   };
@@ -210,13 +213,7 @@ export const Suppliers: React.FC = () => {
               onClick={() => setIsModalOpen(true)}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg shadow-sm flex items-center gap-2 font-bold text-sm hover:bg-blue-700 transition-all"
             >
-              <UserPlus size={18} /> Nhà cung cấp <ChevronDown size={16} />
-            </button>
-            <button className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg shadow-sm flex items-center gap-2 font-bold text-sm hover:bg-slate-50 transition-all">
-              <Upload size={18} /> Import file
-            </button>
-            <button className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg shadow-sm flex items-center gap-2 font-bold text-sm hover:bg-slate-50 transition-all">
-              <Download size={18} /> Xuất file
+              <UserPlus size={18} /> Nhà cung cấp
             </button>
           </div>
           
@@ -227,18 +224,6 @@ export const Suppliers: React.FC = () => {
           >
             <UserPlus size={16} /> Thêm NCC
           </button>
-
-          <div className="hidden md:flex items-center gap-1 border-l border-slate-200 pl-3 ml-1">
-            <button className="p-2 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-lg transition-all">
-              <LayoutGrid size={20} />
-            </button>
-            <button className="p-2 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-lg transition-all">
-              <Settings size={20} />
-            </button>
-            <button className="p-2 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-lg transition-all">
-              <HelpCircle size={20} />
-            </button>
-          </div>
         </div>
       </div>
 
@@ -771,7 +756,7 @@ export const Suppliers: React.FC = () => {
                   type="text" 
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-black outline-none focus:border-blue-400 uppercase shadow-inner" 
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-blue-400 shadow-inner" 
                   placeholder="Tên nhà cung cấp..." 
                 />
               </div>
@@ -781,8 +766,18 @@ export const Suppliers: React.FC = () => {
                   type="text" 
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-black outline-none focus:border-blue-400 uppercase shadow-inner" 
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-blue-400 shadow-inner" 
                   placeholder="Số điện thoại..." 
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Địa chỉ</label>
+                <input 
+                  type="text" 
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-blue-400 shadow-inner" 
+                  placeholder="Địa chỉ..." 
                 />
               </div>
             </div>
