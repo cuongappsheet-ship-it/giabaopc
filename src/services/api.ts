@@ -6,12 +6,17 @@ export const apiService = {
   // Đọc dữ liệu từ 1 sheet
   readSheet: async (sheetName: string) => {
     try {
-      // Use IMAGE_API_URL for Image sheet requests, otherwise main API_URL
-      const url = sheetName === 'Image' 
-        ? `${IMAGE_API_URL}?sheetId=${IMAGE_SHEET_ID}&page=1&pageSize=100` 
-        : `${API_URL}?action=read&sheet=${sheetName}`;
-        
-      const response = await fetch(url);
+      let response;
+      if (sheetName === 'Image') {
+        const url = `${IMAGE_API_URL}?sheetId=${IMAGE_SHEET_ID}&page=1&pageSize=100`;
+        response = await fetch(url);
+      } else {
+        response = await fetch(API_URL, {
+          method: 'POST',
+          body: JSON.stringify({ action: 'read', sheet: sheetName }),
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+        });
+      }
       const result = await response.json();
       console.log(`[API] readSheet(${sheetName}) response:`, result);
       
