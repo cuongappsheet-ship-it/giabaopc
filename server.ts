@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const API_URL = 'https://script.google.com/macros/s/AKfycbw9fB9wBGPiHkoO4qmVxyBl69VcDHyhObmYZnq8vew6wBoXn72AILTGw3KBWOuSvjGLnQ/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbwOwMiNdtjMApWCAoFJz8pfbkThU2ty2SvAANp5IVF0PhkQT9gHblHEHS8y2eH4I7ur/exec';
 
 /**
  * Hàm phân tích số liệu linh hoạt
