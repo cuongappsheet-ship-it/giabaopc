@@ -7,11 +7,20 @@ export const apiService = {
   readSheet: async (sheetName: string) => {
     try {
       // Use IMAGE_API_URL for Image sheet requests, otherwise main API_URL
-      const url = sheetName === 'Image' 
-        ? `${IMAGE_API_URL}?sheetId=${IMAGE_SHEET_ID}&page=1&pageSize=100` 
-        : `${API_URL}?action=read&sheet=${sheetName}`;
+      if (sheetName === 'Image') {
+        const url = `${IMAGE_API_URL}?sheetId=${IMAGE_SHEET_ID}&page=1&pageSize=100`;
+        const response = await fetch(url, { redirect: "follow" });
+        const result = await response.json();
+        return result.data || [];
+      }
+
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'read', sheet: sheetName }),
+        redirect: 'follow'
+      });
         
-      const response = await fetch(url, { redirect: "follow" });
       const textResponse = await response.text();
       let result;
       try {

@@ -122,7 +122,12 @@ async function sendDailyReport(forceToday = false) {
   console.log(`[Report] Starting... (ForceToday: ${forceToday})`);
   const fetchData = async (sheet: string) => {
     try {
-      const res = await fetch(`${API_URL}?action=read&sheet=${sheet}`);
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'read', sheet: sheet }),
+        redirect: 'follow'
+      });
       const json = await res.json() as any;
       return json.data || [];
     } catch { return []; }
@@ -193,7 +198,12 @@ async function sendStockAlert() {
   console.log("[Stock] Checking inventory...");
   const fetchData = async (sheet: string) => {
     try {
-      const res = await fetch(`${API_URL}?action=read&sheet=${sheet}`);
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'read', sheet: sheet }),
+        redirect: 'follow'
+      });
       const json = await res.json() as any;
       return json.data || [];
     } catch { return []; }

@@ -5,7 +5,12 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbwOwMiNdtjMApWCAoFJz8pf
 
 async function check() {
   try {
-    const res = await fetch(`${API_URL}?action=read&sheet=TelegramSettings`);
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'read', sheet: 'TelegramSettings' }),
+      redirect: 'follow'
+    });
     const json = await res.json();
     console.log('TelegramSettings:', JSON.stringify(json, null, 2));
   } catch (e) {
