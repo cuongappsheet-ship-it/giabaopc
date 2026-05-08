@@ -5,7 +5,7 @@ if (!window.__modalStack) {
   window.__modalStack = [];
 }
 
-let isProgrammaticBack = false;
+let programmaticBackCount = 0;
 
 declare global {
   interface Window {
@@ -16,8 +16,8 @@ declare global {
 // Global popstate handler (runs only once per navigation)
 if (!window.__popStateHandlerRegistered) {
   window.addEventListener('popstate', (e) => {
-    if (isProgrammaticBack) {
-      isProgrammaticBack = false;
+    if (programmaticBackCount > 0) {
+      programmaticBackCount--;
       return;
     }
     
@@ -50,28 +50,43 @@ export const useMobileBackModal = (isOpen: boolean, onClose: () => void) => {
     if (!isOpen) return;
 
     const modalId = modalIdRef.current;
+    const stack = window.__modalStack;
     
-    // Add to stack
-    window.__modalStack.push({
-      id: modalId,
-      close: () => onCloseRef.current()
-    });
-    
-    // Push history state
-    window.history.pushState({ ...window.history.state, __modalId: modalId }, '');
+    // Check if this modal is being remounted by Strict Mode and is already in the queue
+    if ((window as any).__modalPendingCleanup?.[modalId]) {
+      clearTimeout((window as any).__modalPendingCleanup[modalId]);
+      delete (window as any).__modalPendingCleanup[modalId];
+    } else {
+      // Fresh mount
+      stack.push({
+        id: modalId,
+        close: () => onCloseRef.current()
+      });
+      
+      const currentLoc = window.location.pathname + window.location.search;
+      window.history.pushState({ ...window.history.state, __modalId: modalId }, '', currentLoc + '#' + modalId);
+    }
 
     return () => {
-      // Remove from stack if unmounted or closed via UI
-      const index = window.__modalStack.findIndex(m => m.id === modalId);
-      if (index > -1) {
-        window.__modalStack.splice(index, 1);
-        
-        // If it was closed via UI (not via back button), we clean up history
-        if (window.history.state?.__modalId === modalId) {
-          isProgrammaticBack = true;
-          window.history.back();
-        }
+      // Delay cleanup to gracefully handle Strict Mode unmount/remount cycle
+      if (!(window as any).__modalPendingCleanup) {
+        (window as any).__modalPendingCleanup = {};
       }
+      
+      (window as any).__modalPendingCleanup[modalId] = setTimeout(() => {
+        delete (window as any).__modalPendingCleanup[modalId];
+        
+        const index = window.__modalStack.findIndex(m => m.id === modalId);
+        if (index > -1) {
+          window.__modalStack.splice(index, 1);
+          
+          if (window.history.state?.__modalId === modalId || window.location.hash === '#' + modalId) {
+            programmaticBackCount++;
+            window.history.back();
+          }
+        }
+      }, 50);
     };
   }, [isOpen]);
 };
+

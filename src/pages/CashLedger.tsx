@@ -6,9 +6,10 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 import { formatNumber, parseFormattedNumber, parseDateString } from '../lib/utils';
 import { generateId } from '../lib/idUtils';
 import { PrintTemplate } from '../components/PrintTemplate';
+import { useMobileBackModal } from '../hooks/useMobileBackModal';
 
 export const CashLedger: React.FC = () => {
-  const { cashTransactions, addCashTransaction } = useAppContext();
+  const { cashTransactions, addCashTransaction, wallets } = useAppContext();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'RECEIPT' | 'PAYMENT'>('ALL');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -22,6 +23,7 @@ export const CashLedger: React.FC = () => {
   const [partner, setPartner] = useState('');
   const [note, setNote] = useState('');
   const [category, setCategory] = useState<any>('OTHER');
+  const [walletId, setWalletId] = useState<string>('');
   
   // Print State
   const [printData, setPrintData] = useState<any>(null);
@@ -66,8 +68,8 @@ export const CashLedger: React.FC = () => {
   const balance = totalReceipts - totalPayments;
 
   const handleAddTransaction = () => {
-    if (!amount || !partner || !note) {
-      alert('Vui lòng nhập đủ thông tin');
+    if (!amount || !partner || !note || !walletId) {
+      alert('Vui lòng nhập đủ thông tin và chọn Ví/Ngân hàng');
       return;
     }
 
@@ -82,7 +84,8 @@ export const CashLedger: React.FC = () => {
       amount: parseFormattedNumber(amount) || 0,
       partner,
       note,
-      category
+      category,
+      walletId: walletId || undefined
     });
 
     setIsModalOpen(false);
@@ -90,9 +93,12 @@ export const CashLedger: React.FC = () => {
     setPartner('');
     setNote('');
     setCategory('OTHER');
+    setWalletId('');
   };
 
-  return (
+
+  useMobileBackModal(isModalOpen, () => setIsModalOpen(false)); // auto-injected
+return (
     <div className="flex flex-col px-4 md:px-0 py-4 md:py-0">
       {/* Print Template Container */}
       {printData && <PrintTemplate {...printData} />}
@@ -381,6 +387,24 @@ export const CashLedger: React.FC = () => {
               </div>
 
               <div>
+                <label className="text-[9px] font-semibold text-slate-400 tracking-wider ml-1">Ví / Ngân hàng thực hiện</label>
+                {wallets.length === 0 ? (
+                   <div className="text-rose-500 font-medium text-xs mt-1">Bạn chưa cấu hình Ví/Ngân hàng</div>
+                ) : (
+                  <select 
+                    value={walletId || ''}
+                    onChange={(e) => setWalletId(e.target.value)}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none mt-1 shadow-inner focus:border-blue-400"
+                  >
+                    <option value="">-- Chọn ví (Bắt buộc) --</option>
+                    {wallets.map((w, idx) => (
+                      <option key={`${w.id}-${idx}`} value={w.id}>{w.name} ({w.type === 'CASH' ? 'Tiền mặt' : 'Ngân hàng'})</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div>
                 <label className="text-[9px] font-semibold text-slate-400 tracking-wider ml-1">Loại thu chi</label>
                 <select 
                   value={category}
@@ -404,7 +428,7 @@ export const CashLedger: React.FC = () => {
                 </button>
                 <button 
                   onClick={() => setIsModalOpen(false)}
-                  className="flex-1 bg-[#991b1b] text-white py-3.5 rounded-lg font-black uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] active:scale-95 transition-all"
+                  className="flex-1 bg-[#991b1b] text-white py-3.5 rounded-lg font-black uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] active:scale-95 transition-all md:hidden"
                 >
                   Đóng
                 </button>

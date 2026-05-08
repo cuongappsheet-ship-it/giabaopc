@@ -40,7 +40,7 @@ const toDMY = (dateStr: string | undefined | null) => {
 };
 
 export const Maintenance: React.FC = () => {
-  const { maintenanceRecords, addMaintenanceRecord, updateMaintenanceRecord, maintenanceTransfers, addMaintenanceTransfer, updateMaintenanceTransfer, customers, addCustomer, suppliers, addSupplier, invoices, externalSerials, addExternalSerial, currentUser, addInvoice, products, serials, updateProduct, returnSalesOrders, tasks, updateTask } = useAppContext();
+  const { maintenanceRecords, addMaintenanceRecord, updateMaintenanceRecord, maintenanceTransfers, addMaintenanceTransfer, updateMaintenanceTransfer, customers, addCustomer, suppliers, addSupplier, invoices, externalSerials, addExternalSerial, currentUser, addInvoice, products, serials, updateProduct, returnSalesOrders, tasks, updateTask, wallets, addCashTransaction, cashTransactions } = useAppContext();
   const location = useLocation();
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
@@ -91,6 +91,8 @@ export const Maintenance: React.FC = () => {
   const [serialNumber, setSerialNumber] = useState('');
   const [issue, setIssue] = useState('');
   const [cost, setCost] = useState('');
+  const [paidAmount, setPaidAmount] = useState('');
+  const [oldDebt, setOldDebt] = useState('');
   const [note, setNote] = useState('');
   const [feedbackText, setFeedbackText] = useState('');
   const [isEditingRecord, setIsEditingRecord] = useState(false);
@@ -122,6 +124,7 @@ export const Maintenance: React.FC = () => {
   const [invoiceSearchTerm, setInvoiceSearchTerm] = useState('');
   const [invoicePaid, setInvoicePaid] = useState('');
   const [invoiceDiscount, setInvoiceDiscount] = useState(0);
+  const [invoiceWalletId, setInvoiceWalletId] = useState('');
 
   const [isSerialModalOpen, setIsSerialModalOpen] = useState(false);
   const [activeSerialProduct, setActiveSerialProduct] = useState<any>(null);
@@ -209,6 +212,9 @@ export const Maintenance: React.FC = () => {
   useMobileBackModal(statusConfirmModal.isOpen, () => setStatusConfirmModal({ isOpen: false, newStatus: null, recordId: null }));
   useMobileBackModal(isInvoiceModalOpen, () => setIsInvoiceModalOpen(false));
   useMobileBackModal(isSerialModalOpen, () => setIsSerialModalOpen(false));
+  useMobileBackModal(customerSuggestions.length > 0, () => setCustomerSuggestions([]));
+  useMobileBackModal(externalDeviceSuggestions.length > 0, () => setExternalDeviceSuggestions([]));
+  useMobileBackModal(isEditingRecord, () => setIsEditingRecord(false));
 
   // Lock scroll when any modal is open
   useScrollLock(
@@ -275,6 +281,9 @@ export const Maintenance: React.FC = () => {
       issue,
       status: 'RECEIVING',
       cost: parseFormattedNumber(cost) || 0,
+      paidAmount: parseFormattedNumber(paidAmount) || 0,
+      oldDebt: parseFormattedNumber(oldDebt) || 0,
+      newDebt: (parseFormattedNumber(oldDebt) || 0) + (parseFormattedNumber(cost) || 0) - (parseFormattedNumber(paidAmount) || 0),
       note,
       warrantyRemainingInfo: warrantyInfo,
       taskId: finalTaskId || undefined
@@ -368,6 +377,8 @@ export const Maintenance: React.FC = () => {
     setSerialNumber('');
     setIssue('');
     setCost('');
+    setPaidAmount('');
+    setOldDebt('');
     setNote('');
     setDeviceSource('STORE');
     setStoreDevices([]);
@@ -394,6 +405,7 @@ export const Maintenance: React.FC = () => {
     setCustomerName(c.name);
     setCustomerPhone(c.phone || '');
     setCustomerAddress(c.address || '');
+    setOldDebt(c.debt ? c.debt.toString() : '0');
     setCustomerSuggestions([]);
     
     // Load store devices
@@ -509,7 +521,7 @@ export const Maintenance: React.FC = () => {
   };
 
   const getWarrantyColor = (info: string | undefined) => {
-    if (!info || info === 'Ngoài bảo hành' || info === 'Hết hạn' || info === '-') return 'text-rose-700';
+    if (!info || info.includes('Ngoài bảo hành') || info === 'Hết hạn' || info === '-') return 'text-slate-500';
     if (info.includes('Còn')) return 'text-emerald-600';
     return 'text-slate-700';
   };
@@ -524,7 +536,8 @@ export const Maintenance: React.FC = () => {
     }
   };
 
-  return (
+
+return (
     <div className="flex flex-col px-4 md:px-0 py-4 md:py-0">
       <div className="flex flex-col md:flex-row md:items-center gap-4 mb-6 shrink-0">
         <div className="flex-1 flex flex-col md:flex-row items-center gap-3">
@@ -570,6 +583,9 @@ export const Maintenance: React.FC = () => {
                 <th className="p-4 text-xs font-bold text-slate-500 tracking-wider text-center uppercase">Trạng thái</th>
                 <th className="p-4 text-xs font-bold text-slate-500 tracking-wider text-center uppercase">Bảo hành</th>
                 <th className="p-4 text-xs font-bold text-slate-500 tracking-wider text-right uppercase">Chi phí</th>
+                <th className="p-4 text-xs font-bold text-slate-500 tracking-wider text-right uppercase italic">Thanh toán</th>
+                <th className="p-4 text-xs font-bold text-slate-500 tracking-wider text-right uppercase italic">Nợ trước đơn</th>
+                <th className="p-4 text-xs font-bold text-slate-500 tracking-wider text-right uppercase italic">Nợ sau đơn</th>
               </tr>
             </thead>
             <tbody>
@@ -620,7 +636,16 @@ export const Maintenance: React.FC = () => {
                       </p>
                     </td>
                     <td className="p-4 text-right">
-                      <span className="font-semibold text-base text-slate-800">{formatNumber(r.cost)}đ</span>
+                      <span className="font-semibold text-sm text-slate-800">{formatNumber(r.cost)}đ</span>
+                    </td>
+                    <td className="p-4 text-right">
+                      <span className="font-semibold text-sm text-emerald-600 italic">{formatNumber(r.paidAmount || 0)}đ</span>
+                    </td>
+                    <td className="p-4 text-right">
+                      <span className="font-semibold text-sm text-slate-500 italic">{formatNumber(r.oldDebt || 0)}đ</span>
+                    </td>
+                    <td className="p-4 text-right">
+                      <span className="font-bold text-sm text-rose-600 italic">{formatNumber(r.newDebt || (r.oldDebt || 0) + r.cost - (r.paidAmount || 0))}đ</span>
                     </td>
                   </tr>
                 ))
@@ -663,9 +688,16 @@ export const Maintenance: React.FC = () => {
                     <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
                       <User size={16} />
                     </div>
-                    <div>
+                    <div className="flex-1">
                       <p className="font-bold text-sm text-slate-800">{r.customerName}</p>
-                      <p className="text-xs text-slate-400 font-medium">{r.customerPhone}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <p className="text-xs text-slate-400 font-medium">{r.customerPhone}</p>
+                        {r.customerPhone && (
+                          <a href={`tel:${r.customerPhone}`} onClick={(e) => e.stopPropagation()} className="p-1 px-1.5 bg-emerald-50 text-emerald-600 rounded-full hover:bg-emerald-100 transition-colors">
+                            <Phone size={10} className="fill-emerald-600 text-transparent" />
+                          </a>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -682,9 +714,24 @@ export const Maintenance: React.FC = () => {
                     </span>
                   </div>
 
-                  <div className="flex justify-between items-center pt-2">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Dự kiến chi phí</span>
-                    <span className="font-bold text-base text-blue-600">{formatNumber(r.cost)}đ</span>
+                  <div className="flex justify-between items-center pt-2 gap-2">
+                    <div className="text-left">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Đã thanh toán</span>
+                      <span className="font-bold text-sm text-emerald-600">{formatNumber(r.paidAmount || 0)}đ</span>
+                    </div>
+                    <div className="text-center">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Nợ trước đơn</span>
+                      <span className="font-bold text-sm text-slate-500">{formatNumber(r.oldDebt || 0)}đ</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Ước tính phí</span>
+                      <span className="font-bold text-base text-blue-600">{formatNumber(r.cost)}đ</span>
+                    </div>
+                  </div>
+                  
+                  <div className="flex justify-between items-center pt-2 border-t border-slate-50">
+                    <span className="text-[10px] font-bold text-rose-500 uppercase tracking-widest uppercase">Nợ sau đơn</span>
+                    <span className="font-black text-rose-600">{formatNumber(r.newDebt || (r.oldDebt || 0) + r.cost - (r.paidAmount || 0))}đ</span>
                   </div>
                 </div>
               ))
@@ -1040,18 +1087,44 @@ export const Maintenance: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-[9px] font-semibold text-slate-400 tracking-wider ml-1">Nợ trước đơn (đ)</label>
+                  <NumericFormat 
+                    value={oldDebt}
+                    thousandSeparator="."
+                    decimalSeparator=","
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none mt-1 shadow-inner opacity-80 cursor-not-allowed text-slate-500" 
+                    placeholder="0"
+                    readOnly
+                  />
+                </div>
                 <div>
                   <label className="text-[9px] font-semibold text-slate-400 tracking-wider ml-1">Dự kiến chi phí (đ)</label>
                   <NumericFormat 
                     value={cost}
-                    onValueChange={(values) => setCost(values.formattedValue)}
+                    onValueChange={(values) => setCost(values.value || '')}
                     thousandSeparator="."
                     decimalSeparator=","
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold outline-none mt-1 shadow-inner focus:border-blue-400" 
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold outline-none mt-1 shadow-inner focus:border-blue-400" 
                     placeholder="0" 
                   />
                 </div>
+                <div>
+                  <label className="text-[9px] font-semibold text-slate-400 tracking-wider ml-1 text-emerald-600">Đã thanh toán (đ)</label>
+                  <NumericFormat 
+                    value={paidAmount}
+                    onValueChange={(values) => setPaidAmount(values.value || '')}
+                    thousandSeparator="."
+                    decimalSeparator=","
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold outline-none mt-1 shadow-inner focus:border-blue-400 text-emerald-600" 
+                    placeholder="0" 
+                  />
+                </div>
+              </div>
+              <div className="mt-1 text-right">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mr-2">Nợ sau đơn:</span>
+                <span className="text-sm font-black text-rose-600">{formatNumber((parseFormattedNumber(oldDebt) || 0) + (parseFormattedNumber(cost) || 0) - (parseFormattedNumber(paidAmount) || 0))}đ</span>
               </div>
 
               <div>
@@ -1085,8 +1158,8 @@ export const Maintenance: React.FC = () => {
       {/* Record Detail Modal */}
       {selectedRecord && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center md:p-4 p-0 bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white w-full h-full md:h-auto md:max-h-[90vh] max-w-md md:max-w-4xl flex flex-col rounded-none md:rounded-xl shadow-2xl animate-in fade-in zoom-in duration-200 overflow-hidden">
-            <div className="flex justify-between items-center p-6 border-b border-slate-100 shrink-0">
+          <div className="bg-white w-full h-full md:h-auto md:max-h-[90vh] max-w-md md:max-w-6xl flex flex-col rounded-none md:rounded-xl shadow-2xl animate-in fade-in zoom-in duration-200 overflow-hidden">
+            <div className="flex justify-between items-center p-4 md:px-6 md:py-4 border-b border-slate-100 shrink-0">
               <h3 className="text-lg font-bold text-slate-800 tracking-tight">Chi tiết phiếu {selectedRecord.id}</h3>
               <div className="flex gap-2">
                 {!isEditingRecord ? (
@@ -1120,7 +1193,7 @@ export const Maintenance: React.FC = () => {
               </div>
             </div>
             
-            <div className={`p-6 overflow-y-auto flex-1 no-scrollbar`}>
+            <div className={`p-4 md:p-5 overflow-y-auto flex-1 no-scrollbar`}>
               {isEditingRecord ? (
                 /* Editing Layout */
                 <div className="space-y-4">
@@ -1157,45 +1230,45 @@ export const Maintenance: React.FC = () => {
                 </div>
               ) : (
                 /* Detail/Grid Layout */
-                <div className="md:grid md:grid-cols-2 md:gap-8 space-y-8 md:space-y-0">
+                <div className="md:grid md:grid-cols-2 md:gap-6 space-y-6 md:space-y-0">
                   {/* Column 1: Identity & Process Handling */}
-                  <div className="space-y-6">
-                    <div className="flex items-center gap-4 p-4 bg-slate-50 border border-slate-100 rounded-2xl">
-                      <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center shrink-0">
-                        <User size={24} />
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-100 rounded-2xl">
+                      <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center shrink-0">
+                        <User size={20} />
                       </div>
                       <div className="flex-1">
-                        <p className="font-bold text-slate-800 tracking-tight leading-none mb-1">{selectedRecord.customerName}</p>
-                        <p className="text-xs text-slate-500 font-semibold font-mono">{selectedRecord.customerPhone}</p>
+                        <p className="font-bold text-slate-800 tracking-tight leading-none mb-0.5">{selectedRecord.customerName}</p>
+                        <p className="text-[11px] text-slate-500 font-semibold font-mono">{selectedRecord.customerPhone}</p>
                       </div>
                     </div>
 
-                    <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-4 shadow-sm">
-                      <div className="flex items-start gap-3">
-                        <Tag className="text-amber-500 shrink-0" size={18} />
+                    <div className="bg-white p-4 rounded-2xl border border-slate-100 space-y-3 shadow-sm">
+                      <div className="flex items-start gap-2.5">
+                        <Tag className="text-amber-500 shrink-0 mt-0.5" size={16} />
                         <div className="flex-1">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Thiết bị</p>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Thiết bị</p>
                           <p className="text-sm font-bold text-slate-800 leading-snug">{selectedRecord.productName}</p>
                           {selectedRecord.serialNumber && (
-                            <span className="mt-1 inline-block px-1.5 py-0.5 bg-orange-50 text-orange-600 rounded font-mono text-[10px] font-bold border border-orange-100">
+                            <span className="mt-0.5 inline-block px-1.5 py-0.5 bg-orange-50 text-orange-600 rounded font-mono text-[9px] font-bold border border-orange-100">
                               SN: {selectedRecord.serialNumber}
                             </span>
                           )}
                         </div>
                       </div>
-                      <div className="flex items-start gap-3">
-                        <AlertCircle className="text-rose-500 shrink-0" size={18} />
+                      <div className="flex items-start gap-2.5">
+                        <AlertCircle className="text-rose-500 shrink-0 mt-0.5" size={16} />
                         <div className="flex-1">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tình trạng lỗi</p>
-                          <p className="text-sm font-medium text-slate-600 bg-slate-50/80 p-3 rounded-lg border border-slate-100/50">{selectedRecord.issue}</p>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Tình trạng lỗi</p>
+                          <p className="text-[13px] font-medium text-slate-600 bg-slate-50/80 p-2 rounded-lg border border-slate-100/50">{selectedRecord.issue}</p>
                         </div>
                       </div>
                     </div>
 
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       <div className="flex items-center gap-2 px-1">
-                        <Clock className="text-blue-500" size={18} />
-                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Quy trình xử lý</p>
+                        <Clock className="text-blue-500" size={16} />
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Quy trình xử lý</p>
                       </div>
                       
                       <div className="grid grid-cols-2 gap-2">
@@ -1207,7 +1280,7 @@ export const Maintenance: React.FC = () => {
                                 setStatusConfirmModal({ isOpen: true, newStatus: s, recordId: selectedRecord.id });
                               }
                             }}
-                            className={`px-3 py-3 rounded-xl text-[10px] font-black tracking-widest uppercase transition-all flex items-center justify-center text-center ${selectedRecord.status === s ? getStatusColor(s) + ' shadow-lg scale-105 ring-2 ring-white z-10' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
+                            className={`px-3 py-2.5 rounded-xl text-[10px] font-black tracking-widest uppercase transition-all flex items-center justify-center text-center ${selectedRecord.status === s ? getStatusColor(s) + ' shadow-lg scale-105 ring-2 ring-white z-10' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
                           >
                             {getStatusText(s)}
                           </button>
@@ -1215,10 +1288,10 @@ export const Maintenance: React.FC = () => {
                       </div>
 
                       {['COMPLETED', 'RETURNED'].includes(selectedRecord.status) && (
-                        <div className="mt-4 space-y-2 animate-in slide-in-from-top-2 duration-300">
+                        <div className="mt-3 space-y-2 animate-in slide-in-from-top-2 duration-300">
                           <textarea
                             placeholder="Nhập nội dung sửa chữa, linh kiện thay thế..."
-                            className="w-full text-sm p-4 border border-slate-200 rounded-2xl outline-none focus:border-blue-400 bg-white shadow-inner h-28 transition-all"
+                            className="w-full text-sm p-3 border border-slate-200 rounded-2xl outline-none focus:border-blue-400 bg-white shadow-inner h-24 transition-all"
                             value={feedbackText}
                             onChange={(e) => setFeedbackText(e.target.value)}
                           />
@@ -1228,7 +1301,7 @@ export const Maintenance: React.FC = () => {
                               setSelectedRecord({...selectedRecord, feedback: feedbackText});
                               alert('Đã lưu thông tin sửa chữa!');
                             }}
-                            className="w-full py-3.5 bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-blue-200 hover:bg-blue-700 hover:-translate-y-0.5 transition-all active:scale-95"
+                            className="w-full py-3 bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95"
                           >
                             Lưu thông tin xử lý
                           </button>
@@ -1238,36 +1311,76 @@ export const Maintenance: React.FC = () => {
                   </div>
 
                   {/* Column 2: Financial, Transfer & Invoice */}
-                  <div className="space-y-6">
-                    <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200 space-y-5 shadow-sm">
-                      <div className="flex flex-col gap-1 w-full relative">
-                        <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-1">Ước tính chi phí (Sửa chữa)</span>
-                        <div className="flex items-center gap-2 relative w-full bg-white px-4 py-3 rounded-2xl border border-slate-200 shadow-inner focus-within:border-blue-400 transition-all">
+                  <div className="space-y-4">
+                    <div className="bg-slate-50 p-4 rounded-3xl border border-slate-200 space-y-4 shadow-sm">
+                      <div className="flex flex-col gap-0.5 w-full relative">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Ước tính chi phí (Sửa chữa)</span>
+                        <div className="flex items-center gap-2 relative w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-200 shadow-inner focus-within:border-blue-400 transition-all">
                           <input 
                             type="text"
-                            className="text-xl font-black text-slate-800 bg-transparent outline-none w-full"
+                            className="text-lg font-black text-slate-800 bg-transparent outline-none w-full"
                             value={formatNumber(selectedRecord.cost)}
                             onChange={(e) => {
                               const val = parseFormattedNumber(e.target.value) || 0;
-                              updateMaintenanceRecord(selectedRecord.id, { cost: val });
-                              setSelectedRecord({...selectedRecord, cost: val});
+                              updateMaintenanceRecord(selectedRecord.id, { cost: val, newDebt: (selectedRecord.oldDebt || 0) + val - (selectedRecord.paidAmount || 0) });
+                              setSelectedRecord({...selectedRecord, cost: val, newDebt: (selectedRecord.oldDebt || 0) + val - (selectedRecord.paidAmount || 0)});
                             }}
                           />
-                          <span className="text-lg font-black text-slate-400">đ</span>
+                          <span className="text-base font-black text-slate-400">đ</span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex flex-col gap-0.5 w-full relative">
+                          <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest pl-1">Đã thanh toán</span>
+                          <div className="flex items-center gap-2 relative w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-200 shadow-inner focus-within:border-emerald-400 transition-all">
+                            <input 
+                              type="text"
+                              className="text-base font-black text-emerald-700 bg-transparent outline-none w-full"
+                              value={formatNumber(selectedRecord.paidAmount || 0)}
+                              onChange={(e) => {
+                                const val = parseFormattedNumber(e.target.value) || 0;
+                                updateMaintenanceRecord(selectedRecord.id, { paidAmount: val, newDebt: (selectedRecord.oldDebt || 0) + (selectedRecord.cost || 0) - val });
+                                setSelectedRecord({...selectedRecord, paidAmount: val, newDebt: (selectedRecord.oldDebt || 0) + (selectedRecord.cost || 0) - val});
+                              }}
+                            />
+                            <span className="text-sm font-black text-emerald-400">đ</span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-0.5 w-full relative">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Nợ trước đơn</span>
+                          <div className="flex items-center gap-2 relative w-full bg-slate-50/50 px-4 py-2.5 rounded-2xl border border-slate-200">
+                            <input 
+                              type="text"
+                              className="text-base font-black text-slate-500 bg-transparent outline-none w-full cursor-not-allowed"
+                              value={formatNumber(selectedRecord.oldDebt || 0)}
+                              readOnly
+                            />
+                            <span className="text-sm font-black text-slate-400">đ</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between items-center bg-slate-100 p-3 rounded-2xl shadow-inner border border-slate-200">
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Nợ sau đơn</span>
+                        <div className="flex items-center gap-1">
+                          <span className="text-lg font-black text-rose-600">{formatNumber(selectedRecord.newDebt || ((selectedRecord.oldDebt || 0) + (selectedRecord.cost || 0) - (selectedRecord.paidAmount || 0)))}</span>
+                          <span className="text-base font-black text-rose-400">đ</span>
                         </div>
                       </div>
 
                       {selectedRecord.invoiceId ? (() => {
                         const linkedInvoice = invoices?.find(inv => inv.id === selectedRecord.invoiceId);
                         return (
-                          <div className="space-y-4">
-                            <div className="flex items-center justify-between text-emerald-800 bg-white border border-emerald-100 px-4 py-3 rounded-2xl shadow-sm">
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between text-emerald-800 bg-white border border-emerald-100 px-4 py-2.5 rounded-2xl shadow-sm">
                               <div className="flex items-center gap-2">
-                                <CheckCircle size={18} className="text-emerald-500" />
-                                <span className="text-[10px] font-black uppercase tracking-widest">Đã lập hóa đơn</span>
+                                <CheckCircle size={16} className="text-emerald-500" />
+                                <span className="text-[9px] font-black uppercase tracking-widest">Đã lập hóa đơn</span>
                               </div>
                               <span 
-                                className="font-black text-xs tracking-widest cursor-pointer hover:underline text-blue-600"
+                                className="font-black text-[11px] tracking-widest cursor-pointer hover:underline text-blue-600"
                                 onClick={() => {
                                   if (linkedInvoice) {
                                     setSelectedInvoiceForDetail(linkedInvoice);
@@ -1280,16 +1393,16 @@ export const Maintenance: React.FC = () => {
                               </span>
                             </div>
                             {linkedInvoice && (
-                              <div className="bg-white border border-slate-200 p-4 rounded-2xl space-y-2 shadow-sm">
+                              <div className="bg-white border border-slate-200 p-3 rounded-2xl space-y-1.5 shadow-sm">
                                 {linkedInvoice.items.map((item, idxx) => (
-                                  <div key={idxx} className="flex justify-between items-center text-[13px]">
+                                  <div key={idxx} className="flex justify-between items-center text-[12px]">
                                     <span className="text-slate-600 font-bold line-clamp-1 flex-1 pr-4">{item.qty}x {item.name}</span>
                                     <span className="text-slate-900 font-black">{formatNumber(item.price * item.qty)}đ</span>
                                   </div>
                                 ))}
-                                <div className="flex justify-between items-center pt-3 mt-1 border-t border-dashed border-slate-200">
-                                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Tổng cộng</span>
-                                  <span className="text-base font-black text-blue-600">{formatNumber(linkedInvoice.total)}đ</span>
+                                <div className="flex justify-between items-center pt-2 mt-1 border-t border-dashed border-slate-200">
+                                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Tổng cộng</span>
+                                  <span className="text-sm font-black text-blue-600">{formatNumber(linkedInvoice.total)}đ</span>
                                 </div>
                               </div>
                             )}
@@ -1300,9 +1413,9 @@ export const Maintenance: React.FC = () => {
                           <div className="animate-in slide-in-from-bottom-2 duration-300">
                             <button
                               onClick={() => setIsInvoiceModalOpen(true)}
-                              className="w-full flex items-center justify-center gap-3 py-4 bg-blue-600 text-white font-black uppercase tracking-widest rounded-2xl text-[11px] hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 active:scale-95"
+                              className="w-full flex items-center justify-center gap-2 py-3.5 bg-blue-600 text-white font-black uppercase tracking-widest rounded-2xl text-[10px] hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 active:scale-95"
                             >
-                              <Plus size={18} /> Lập Đơn Xuất Bán
+                              <Plus size={16} /> Lập Đơn Xuất Bán
                             </button>
                           </div>
                         )
@@ -1374,7 +1487,7 @@ export const Maintenance: React.FC = () => {
               )}
             </div>
             
-            <div className="p-4 md:p-6 border-t border-slate-100 bg-slate-50/50 shrink-0">
+            <div className="p-4 md:p-6 border-t border-slate-100 bg-slate-50/50 shrink-0 md:hidden">
               <button 
                 onClick={() => {
                   setSelectedRecord(null);
@@ -1992,7 +2105,7 @@ export const Maintenance: React.FC = () => {
                 <div className="relative">
                   <NumericFormat
                     value={invoicePaid}
-                    onValueChange={(values) => setInvoicePaid(values.formattedValue)}
+                    onValueChange={(values) => setInvoicePaid(values.value || '')}
                     thousandSeparator="."
                     decimalSeparator=","
                     className="w-full p-3 bg-white border border-slate-200 rounded-lg text-lg font-bold outline-none focus:border-blue-400 text-right pr-8"
@@ -2003,6 +2116,26 @@ export const Maintenance: React.FC = () => {
                 <div className="flex justify-end gap-2 mt-2">
                   <button onClick={() => setInvoicePaid(formatNumber(Math.max(0, invoiceItems.reduce((acc, item) => acc + item.price * item.qty, 0) - invoiceDiscount)))} className="px-2 py-1 bg-slate-100 border border-slate-200 text-slate-600 rounded text-xs font-semibold hover:bg-slate-200">Ghi nhận nhanh: Thanh toán đủ</button>
                 </div>
+                {parseFormattedNumber(invoicePaid) > 0 && (
+                  <div className="mt-4 animate-in fade-in slide-in-from-top-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 block mb-2">Chọn ví nhận tiền *</label>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                      {wallets.map((w, idx) => {
+                        const isSelected = invoiceWalletId === w.id || (!invoiceWalletId && idx === 0);
+                        return (
+                          <button
+                           key={w.id}
+                           onClick={() => setInvoiceWalletId(w.id)}
+                           className={`p-3 rounded-xl border text-left transition-colors flex flex-col gap-1 ${isSelected ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200 hover:border-slate-300'}`}
+                          >
+                            <span className={`text-[10px] font-bold ${isSelected ? 'text-blue-600' : 'text-slate-500'}`}>{w.type === 'CASH' ? 'Tiền mặt' : w.type === 'BANK' ? 'Ngân hàng' : 'Ví điện tử'}</span>
+                            <span className={`font-semibold text-sm line-clamp-1 ${isSelected ? 'text-blue-900' : 'text-slate-700'}`}>{w.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -2015,14 +2148,37 @@ export const Maintenance: React.FC = () => {
                     return;
                   }
                   
+                  const paidVal = parseFormattedNumber(invoicePaid) || 0;
+                  const finalWalletId = invoiceWalletId || (wallets.length > 0 ? wallets[0].id : undefined);
+
+                  if (paidVal > 0 && !finalWalletId) {
+                    alert('Vui lòng tạo ít nhất một ví/tài khoản để nhận tiền!');
+                    return;
+                  }
+
                   const invoiceTotalRaw = invoiceItems.reduce((acc, item) => acc + item.price * item.qty, 0);
                   const invoiceTotal = Math.max(0, invoiceTotalRaw - invoiceDiscount);
-                  const paidVal = parseFormattedNumber(invoicePaid) || 0;
                   const newId = generateId('HD', invoices || []);
+                  const dateStr = new Date().toLocaleString('vi-VN');
+
+                  if (paidVal > 0) {
+                    const transactionId = generateId('PT', cashTransactions);
+                    addCashTransaction({
+                      id: transactionId,
+                      date: dateStr,
+                      type: 'RECEIPT',
+                      amount: paidVal,
+                      category: 'SALES_REVENUE',
+                      partner: selectedRecord?.customerName || 'Khách lẻ',
+                      note: `Thu tiền sửa chữa phiếu ${selectedRecord?.id}`,
+                      refId: newId,
+                      walletId: finalWalletId
+                    });
+                  }
 
                   const newInvoice = {
                     id: newId,
-                    date: new Date().toLocaleString('vi-VN'),
+                    date: dateStr,
                     customer: selectedRecord?.customerName || 'Khách lẻ',
                     phone: selectedRecord?.customerPhone || '',
                     total: invoiceTotal,
@@ -2030,7 +2186,8 @@ export const Maintenance: React.FC = () => {
                     debt: Math.max(0, invoiceTotal - paidVal),
                     discount: invoiceDiscount,
                     items: invoiceItems.map(i => ({...i, sn: i.serials?.join(', ') || undefined, importPriceTotal: i.importPriceTotal * i.qty})),
-                    paymentMethod: 'CASH',
+                    paymentMethod: finalWalletId ? (wallets.find(w => w.id === finalWalletId)?.type === 'CASH' ? 'CASH' : 'TRANSFER') : 'CASH',
+                    walletId: paidVal > 0 ? finalWalletId : undefined,
                     note: `Thanh toán sửa chữa phiếu ${selectedRecord?.id}`
                   };
 
@@ -2043,6 +2200,7 @@ export const Maintenance: React.FC = () => {
                   setInvoiceItems([]);
                   setInvoicePaid('');
                   setInvoiceSearchTerm('');
+                  setInvoiceWalletId('');
                   
                   // Optional: Redirect to invoice page without confirm
                   // navigate(`/invoices?id=${newId}`);
@@ -2176,7 +2334,7 @@ export const Maintenance: React.FC = () => {
 
         return (
           <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-            <div className="bg-white w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+            <div className="bg-white w-full max-w-5xl rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
               <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg">
@@ -2301,7 +2459,7 @@ export const Maintenance: React.FC = () => {
                 </div>
               </div>
 
-              <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex gap-3">
+              <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex gap-3 md:hidden">
                 <button 
                   onClick={() => navigate('/pos', { state: { editInvoice: selectedInvoiceForDetail } })}
                   className="flex-1 py-3 bg-blue-50 border border-blue-200 text-blue-600 font-bold rounded-lg uppercase text-[10px] tracking-widest shadow-sm hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"

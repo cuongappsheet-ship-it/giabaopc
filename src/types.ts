@@ -13,12 +13,15 @@ export interface Product {
   brand?: string;
   expectedOutOfStock?: string;
   image?: string;
+  lowStockThreshold?: number;
+  status: 'Đang kinh doanh' | 'Ngừng kinh doanh';
 }
 
 export interface Customer {
   id?: string;
   name: string;
   phone: string;
+  phone2?: string;
   address?: string;
   location?: string;
   note?: string;
@@ -63,6 +66,8 @@ export interface Invoice {
   discount?: number;
   note?: string;
   taskId?: string;
+  paymentMethod?: 'CASH' | 'TRANSFER' | 'CARD' | 'WALLET';
+  walletId?: string;
 }
 
 export interface ImportItem {
@@ -89,6 +94,7 @@ export interface ImportOrder {
   otherCost?: number;
   note?: string;
   returned?: boolean;
+  walletId?: string;
 }
 
 export interface CashTransaction {
@@ -100,6 +106,7 @@ export interface CashTransaction {
   partner: string;
   note: string;
   refId?: string; // ID of Invoice or ImportOrder
+  walletId?: string;
 }
 
 export interface POSDraft {
@@ -113,14 +120,24 @@ export interface POSDraft {
     selectedCustomer: Customer | null;
     note: string;
     paymentMethod: 'CASH' | 'TRANSFER' | 'CARD' | 'WALLET';
+    walletId?: string;
   }[];
 }
 
 export interface ImportDraft {
+  editingId?: string;
   cart: ImportItem[];
   selectedSupplier: Supplier | null;
   paid: number | '';
   isExplicitIntent?: boolean;
+  walletId?: string;
+  transactionDate?: string;
+  note?: string;
+  orderCode?: string;
+  returnCost?: number;
+  shippingFee?: number;
+  otherCost?: number;
+  overallDiscount?: number;
 }
 
 export interface MaintenanceTransfer {
@@ -146,6 +163,9 @@ export interface MaintenanceRecord {
   issue: string;
   status: 'RECEIVING' | 'REPAIRING' | 'COMPLETED' | 'RETURNED';
   cost: number;
+  paidAmount?: number;
+  oldDebt?: number;
+  newDebt?: number;
   note: string;
   returnDate?: string;
   transferId?: string; // ID của phiếu chuyển tuyến
@@ -245,6 +265,20 @@ export interface Task {
   repairId?: string;
 }
 
+export interface Wallet {
+  id: string;
+  name: string; // e.g. Tiền mặt, MB Bank, Vietcombank
+  type: 'CASH' | 'BANK' | 'EWALLET';
+  balance: number;
+  accountNumber?: string;
+  bankName?: string;
+  ownerName?: string;
+  isActive: boolean;
+  icon?: string;
+  color?: string;
+  backgroundImage?: string;
+}
+
 export interface ExternalSerial {
   id: string;
   date: string;
@@ -253,6 +287,31 @@ export interface ExternalSerial {
   customer?: string;
   source?: string;
   createdBy?: string;
+  note?: string;
+}
+
+export interface WifiRecord {
+  id: string;
+  customerName: string;
+  customerPhone: string;
+  customerAddress: string;
+  wifiName: string;
+  wifiPassword?: string;
+  createdAt: string;
+  createdBy: string;
+  note?: string;
+}
+
+export interface CameraAccountRecord {
+  id: string;
+  customerName: string;
+  customerPhone: string;
+  customerAddress: string;
+  accountName: string;
+  accountPassword?: string;
+  cameraBrand?: string;
+  createdAt: string;
+  createdBy: string;
   note?: string;
 }
 
@@ -265,12 +324,19 @@ export interface ImageItem {
   category: string;
 }
 
+export interface Category {
+  id: string;
+  name: string;
+}
+
 export interface AppState {
   currentUser: User | null;
   users: User[];
   products: Product[];
   customers: Customer[];
   suppliers: Supplier[];
+  brands: Category[]; // Using Category for now since it's just id/name
+  categories: Category[];
   invoices: Invoice[];
   importOrders: ImportOrder[];
   returnImportOrders: ReturnImportOrder[];
@@ -282,9 +348,12 @@ export interface AppState {
   serials: Serial[];
   stockCards: StockCard[];
   externalSerials: ExternalSerial[];
+  wifiRecords: WifiRecord[];
+  cameraAccounts: CameraAccountRecord[];
   tasks: Task[];
   telegramSettings: TelegramSettings;
   posDraft?: POSDraft;
   importDraft?: ImportDraft;
   printSettings: PrintSettings;
+  wallets: Wallet[];
 }

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Search, Plus, Box, Wrench, Barcode, X, ArrowDownLeft, ArrowUpRight, FileText, Calendar, User, Package, CreditCard, Truck, Star, Settings, HelpCircle, LayoutGrid, Download, Upload, ChevronDown, Filter, Edit3, Image as ImageIcon, RotateCcw, ExternalLink, Printer, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Search, Plus, Box, Wrench, Barcode, X, ArrowDownLeft, ArrowUpRight, FileText, Calendar, User, Package, CreditCard, Truck, Star, Settings, HelpCircle, LayoutGrid, Download, Upload, ChevronDown, Filter, Edit3, Image as ImageIcon, RotateCcw, ExternalLink, Printer, ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { Product, Invoice, ImportOrder, ReturnImportOrder, ReturnSalesOrder } from '../types';
 import { formatNumber, parseFormattedNumber } from '../lib/utils';
@@ -16,8 +16,17 @@ import { AnimatePresence } from 'motion/react';
 
 export const Inventory: React.FC = () => {
   const navigate = useNavigate();
-  const { products, addProduct, stockCards, invoices, importOrders, serials, updateProduct, suppliers, setImportDraft, returnImportOrders, returnSalesOrders } = useAppContext();
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchParams] = useSearchParams();
+  const { products, addProduct, stockCards, invoices, importOrders, serials, updateProduct, suppliers, setImportDraft, returnImportOrders, returnSalesOrders, brands, categories } = useAppContext();
+  const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
+
+  useEffect(() => {
+    const q = searchParams.get('search');
+    if (q) {
+      setSearchTerm(q);
+    }
+  }, [searchParams]);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   
   useMobileBackModal(isModalOpen, () => setIsModalOpen(false));
@@ -43,7 +52,8 @@ export const Inventory: React.FC = () => {
 
   const hasChanges = () => {
     if (selectedProduct) {
-      return (
+
+return (
         name !== selectedProduct.name ||
         pType !== (selectedProduct.isService ? 'service' : 'product') ||
         parseFormattedNumber(price) !== selectedProduct.price ||
@@ -55,6 +65,8 @@ export const Inventory: React.FC = () => {
         category !== (selectedProduct.category || '') ||
         brand !== (selectedProduct.brand || '') ||
         expectedOutOfStock !== (selectedProduct.expectedOutOfStock || '') ||
+        lowStockThreshold !== (selectedProduct.lowStockThreshold?.toString() || '') ||
+        pStatus !== (selectedProduct.status || 'Đang kinh doanh') ||
         image !== selectedProduct.image
       );
     }
@@ -106,23 +118,38 @@ export const Inventory: React.FC = () => {
   const [category, setCategory] = useState('');
   const [brand, setBrand] = useState('');
   const [expectedOutOfStock, setExpectedOutOfStock] = useState('');
+  const [lowStockThreshold, setLowStockThreshold] = useState('');
+  const [pStatus, setPStatus] = useState<'Đang kinh doanh' | 'Ngừng kinh doanh'>('Đang kinh doanh');
   const [image, setImage] = useState<string | undefined>(undefined);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
 
+  const [statusFilter, setStatusFilter] = useState<'Đang kinh doanh' | 'Ngừng kinh doanh' | 'ALL'>('Đang kinh doanh');
+  const [activeFilter, setActiveFilter] = useState('ALL');
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
 
   const filteredProducts = useMemo(() => {
-    if (!searchTerm.trim()) return products || [];
-    return (products || []).filter(p => 
+    let result = products || [];
+    
+    if (statusFilter !== 'ALL') {
+      result = result.filter(p => (p.status || 'Đang kinh doanh') === statusFilter);
+    }
+
+    if (activeFilter === 'LOW_STOCK') {
+      result = result.filter(p => !p.isService && p.stock !== null && p.stock < (p.lowStockThreshold ?? 5));
+    }
+
+    if (!searchTerm.trim()) return result;
+    
+    return result.filter(p => 
       (p.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
       (p.id || '').toLowerCase().includes(searchTerm.toLowerCase())
     );
-  }, [products, searchTerm]);
+  }, [products, searchTerm, activeFilter, statusFilter]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, rowsPerPage]);
+  }, [searchTerm, activeFilter, statusFilter, rowsPerPage]);
 
   const totalPages = Math.ceil(filteredProducts.length / rowsPerPage);
   const startIndex = (currentPage - 1) * rowsPerPage;
@@ -141,6 +168,8 @@ export const Inventory: React.FC = () => {
     setCategory('');
     setBrand('');
     setExpectedOutOfStock('');
+    setLowStockThreshold('');
+    setPStatus('Đang kinh doanh');
     setImage(undefined);
   };
 
@@ -166,6 +195,8 @@ export const Inventory: React.FC = () => {
         category,
         brand,
         expectedOutOfStock,
+        lowStockThreshold: Number(lowStockThreshold) || 0,
+        status: pStatus,
         image
       });
     } else {
@@ -186,6 +217,8 @@ export const Inventory: React.FC = () => {
         category,
         brand,
         expectedOutOfStock,
+        lowStockThreshold: Number(lowStockThreshold) || 0,
+        status: pStatus,
         image
       });
     }
@@ -208,6 +241,8 @@ export const Inventory: React.FC = () => {
         category,
         brand,
         expectedOutOfStock,
+        lowStockThreshold: Number(lowStockThreshold) || 0,
+        status: pStatus,
         image
       });
     } else {
@@ -323,6 +358,8 @@ export const Inventory: React.FC = () => {
 
   const totalStock = filteredProducts.reduce((sum, p) => sum + (p.stock || 0), 0);
 
+  useMobileBackModal(isLibraryOpen, () => setIsLibraryOpen(false)); // auto-injected
+
   return (
     <div className="flex flex-col bg-slate-50 md:bg-white">
       {/* Toolbar */}
@@ -337,7 +374,26 @@ export const Inventory: React.FC = () => {
             placeholder="Theo mã, tên hàng" 
             className="flex-1 bg-transparent text-sm font-medium outline-none"
           />
-          <Filter className="text-slate-400 cursor-pointer hover:text-blue-600" size={18} />
+        </div>
+
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 md:pb-0">
+          <select 
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as any)}
+            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-600 outline-none focus:border-blue-400"
+          >
+            <option value="Đang kinh doanh">⚡ Đang kinh doanh</option>
+            <option value="Ngừng kinh doanh">🚫 Ngừng kinh doanh</option>
+            <option value="ALL">📦 Tất cả</option>
+          </select>
+
+          <button 
+            onClick={() => setActiveFilter(activeFilter === 'ALL' ? 'LOW_STOCK' : 'ALL')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all border shrink-0 ${activeFilter === 'LOW_STOCK' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+          >
+            <AlertTriangle size={16} />
+            Sắp hết hàng
+          </button>
         </div>
 
         {/* Right: Actions */}
@@ -364,27 +420,21 @@ export const Inventory: React.FC = () => {
           <table className="w-full border-collapse text-left">
             <thead className="sticky top-0 z-10 bg-white border-b border-slate-200">
               <tr className="text-slate-700 text-sm font-bold">
-                <th className="p-3 w-10"><input type="checkbox" className="rounded border-slate-300" /></th>
-                <th className="p-3 w-10"></th>
                 <th className="p-3 w-12"></th>
                 <th className="p-3">Mã hàng</th>
                 <th className="p-3">Tên hàng</th>
                 <th className="p-3">ĐVT</th>
                 <th className="p-3">Nhóm hàng</th>
                 <th className="p-3">Thương hiệu</th>
+                <th className="p-3">Trạng thái</th>
                 <th className="p-3 text-right">Giá bán</th>
                 <th className="p-3 text-right">Giá vốn</th>
                 <th className="p-3 text-right">Tồn kho</th>
-                <th className="p-3 text-right">Khách đặt</th>
-                <th className="p-3 text-right">Thời gian tạo</th>
-                <th className="p-3 text-right">Dự kiến hết hàng</th>
               </tr>
               {/* Summary Row */}
               <tr className="bg-slate-50/50 text-slate-800 text-[13px] font-bold border-b border-slate-100">
-                <td colSpan={7}></td>
+                <td colSpan={9}></td>
                 <td className="p-3 text-right">{formatNumber(totalStock)}</td>
-                <td className="p-3 text-right">0</td>
-                <td colSpan={2}></td>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -394,8 +444,6 @@ export const Inventory: React.FC = () => {
                   onClick={() => { setSelectedProduct(p); setSerialStatusTab('IN_STOCK'); }}
                   className="hover:bg-blue-50/30 transition-colors cursor-pointer text-[13px] text-slate-600 group"
                 >
-                  <td className="p-3"><input type="checkbox" className="rounded border-slate-300" onClick={(e) => e.stopPropagation()} /></td>
-                  <td className="p-3"><Star size={16} className="text-slate-300 group-hover:text-amber-400 transition-colors" /></td>
                   <td className="p-3">
                     <div className={`w-8 h-8 ${p.color} rounded flex items-center justify-center text-white shadow-sm overflow-hidden`}>
                       {p.image ? (
@@ -410,12 +458,21 @@ export const Inventory: React.FC = () => {
                   <td className="p-3 text-slate-500">{p.unit || '---'}</td>
                   <td className="p-3 text-slate-500">{p.category || '---'}</td>
                   <td className="p-3 text-slate-500">{p.brand || '---'}</td>
+                  <td className="p-3">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      (p.status || 'Đang kinh doanh') === 'Đang kinh doanh' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+                    }`}>
+                      {p.status || 'Đang kinh doanh'}
+                    </span>
+                  </td>
                   <td className="p-3 text-right font-bold">{formatNumber(p.price)}</td>
                   <td className="p-3 text-right">{formatNumber(p.importPrice || 0)}</td>
-                  <td className="p-3 text-right font-bold text-slate-800">{p.stock ?? '---'}</td>
-                  <td className="p-3 text-right">0</td>
-                  <td className="p-3 text-right text-slate-400">11/02/2026 21:00</td>
-                  <td className="p-3 text-right text-slate-400">{p.expectedOutOfStock || '---'}</td>
+                  <td className={`p-3 text-right font-bold ${p.stock !== null && p.stock < (p.lowStockThreshold ?? 5) && !p.isService ? 'text-red-500' : 'text-slate-800'}`}>
+                    {p.stock ?? '---'}
+                    {p.stock !== null && p.stock < (p.lowStockThreshold ?? 5) && !p.isService && (
+                      <span className="ml-1 inline-flex w-2 h-2 rounded-full bg-red-500" title="Tồn kho thấp"></span>
+                     )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -455,7 +512,7 @@ export const Inventory: React.FC = () => {
                 </div>
                 <div className="text-right pl-3 border-l border-slate-100 shrink-0 min-w-[65px]">
                   <p className="text-[9px] text-slate-400 font-bold tracking-widest mb-1">{p.isService ? 'Trạng thái' : 'Tồn kho'}</p>
-                  <p className={`font-bold ${p.isService ? 'text-emerald-500 text-xs sm:text-sm' : 'text-slate-800 text-lg sm:text-xl'}`}>
+                  <p className={`font-bold ${p.isService ? 'text-emerald-500 text-xs sm:text-sm' : (p.stock !== null && p.stock < (p.lowStockThreshold ?? 5) ? 'text-red-500 text-lg sm:text-xl' : 'text-slate-800 text-lg sm:text-xl')}`}>
                     {p.isService ? 'Sẵn sàng' : p.stock}
                   </p>
                 </div>
@@ -524,6 +581,8 @@ export const Inventory: React.FC = () => {
             setCategory(p.category || '');
             setBrand(p.brand || '');
             setExpectedOutOfStock(p.expectedOutOfStock || '');
+            setLowStockThreshold(p.lowStockThreshold?.toString() || '');
+            setPStatus((p.status as any) || 'Đang kinh doanh');
             setImage(p.image);
             setIsModalOpen(true);
           }}
@@ -534,18 +593,21 @@ export const Inventory: React.FC = () => {
       {/* Invoice Detail Modal (Shared) */}
       {viewingInvoice && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center md:p-4 p-0 bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-2xl md:rounded-xl rounded-none shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full md:h-auto md:max-h-[90vh]">
+          <div className="bg-white w-full max-w-5xl md:rounded-xl rounded-none shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full md:h-auto md:max-h-[90vh]">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg">
                   <FileText size={20} />
                 </div>
                 <div>
-                  <h3 className="text-lg font-black text-slate-800 tracking-tighter uppercase">Chi tiết hóa đơn</h3>
-                  <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest">Mã: {viewingInvoice.id}</p>
+                  <h3 className="md:text-2xl text-lg font-black text-slate-800 tracking-tighter uppercase">Chi tiết hóa đơn</h3>
+                  <p className="md:text-sm text-[10px] font-bold text-blue-600 uppercase tracking-widest">Mã: {viewingInvoice.id}</p>
                 </div>
               </div>
-              <button onClick={() => setViewingInvoice(null)} className="w-8 h-8 bg-white text-slate-400 rounded-full hover:bg-slate-200 transition-colors flex items-center justify-center shadow-sm border border-slate-100">
+              <button 
+                onClick={() => setViewingInvoice(null)} 
+                className="w-8 h-8 bg-white text-slate-400 rounded-full hover:bg-slate-200 transition-colors flex items-center justify-center shadow-sm border border-slate-100"
+              >
                 <X size={18} />
               </button>
             </div>
@@ -554,15 +616,15 @@ export const Inventory: React.FC = () => {
                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 flex items-center gap-3">
                   <Calendar className="text-slate-400" size={18} />
                   <div>
-                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Ngày lập phiếu</p>
-                    <p className="text-xs font-black text-slate-800">{viewingInvoice.date}</p>
+                    <p className="md:text-sm text-[9px] font-bold text-slate-400 uppercase tracking-widest">Ngày lập phiếu</p>
+                    <p className="md:text-lg text-xs font-black text-slate-800">{viewingInvoice.date}</p>
                   </div>
                 </div>
                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 flex items-center gap-3">
                   <User className="text-slate-400" size={18} />
                   <div>
-                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Khách hàng</p>
-                    <p className="text-xs font-black text-slate-800 uppercase">{viewingInvoice.customer}</p>
+                    <p className="md:text-sm text-[9px] font-bold text-slate-400 uppercase tracking-widest">Khách hàng</p>
+                    <p className="md:text-lg text-xs font-black text-slate-800 uppercase">{viewingInvoice.customer}</p>
                   </div>
                 </div>
               </div>
@@ -570,20 +632,20 @@ export const Inventory: React.FC = () => {
                 <table className="w-full text-left border-collapse">
                   <thead className="bg-slate-50">
                     <tr>
-                      <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase">Sản phẩm</th>
-                      <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase text-center">SL</th>
-                      <th className="px-4 py-3 text-[9px] font-black text-slate-400 uppercase text-right">Thành tiền</th>
+                      <th className="px-4 py-3 md:text-sm text-[9px] font-black text-slate-400 uppercase">Sản phẩm</th>
+                      <th className="px-4 py-3 md:text-sm text-[9px] font-black text-slate-400 uppercase text-center">SL</th>
+                      <th className="px-4 py-3 md:text-sm text-[9px] font-black text-slate-400 uppercase text-right">Thành tiền</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {viewingInvoice.items.map((item, idx) => (
                       <tr key={idx}>
                         <td className="px-4 py-3">
-                          <p className="text-xs font-black text-slate-800 uppercase tracking-tighter">{item.name}</p>
-                          {item.sn && <p className="text-[8px] text-orange-500 font-bold mt-0.5 font-mono uppercase">SN: {item.sn}</p>}
+                          <p className="md:text-lg text-xs font-black text-slate-800 uppercase tracking-tighter">{item.name}</p>
+                          {item.sn && <p className="md:text-xs text-[8px] text-orange-500 font-bold mt-0.5 font-mono uppercase">SN: {item.sn}</p>}
                         </td>
-                        <td className="px-4 py-3 text-center text-xs font-black text-slate-600">{item.qty}</td>
-                        <td className="px-4 py-3 text-right text-xs font-black text-slate-800">{formatNumber(item.qty * (item.price || 0))}đ</td>
+                        <td className="px-4 py-3 text-center md:text-lg text-xs font-black text-slate-600">{item.qty}</td>
+                        <td className="px-4 py-3 text-right md:text-lg text-xs font-black text-slate-800">{formatNumber(item.qty * (item.price || 0))}đ</td>
                       </tr>
                     ))}
                   </tbody>
@@ -591,13 +653,18 @@ export const Inventory: React.FC = () => {
               </div>
               <div className="bg-blue-50/50 p-6 rounded-xl border border-blue-100">
                 <div className="flex justify-between items-center pt-3 border-t border-blue-200">
-                  <span className="text-sm font-black text-blue-800 uppercase tracking-widest">Tổng thanh toán</span>
-                  <span className="text-2xl font-black text-blue-600 tracking-tighter">{formatNumber(viewingInvoice.total || 0)}đ</span>
+                  <span className="md:text-lg text-sm font-black text-blue-800 uppercase tracking-widest">Tổng thanh toán</span>
+                  <span className="md:text-4xl text-2xl font-black text-blue-600 tracking-tighter">{formatNumber(viewingInvoice.total || 0)}đ</span>
                 </div>
               </div>
             </div>
             <div className="p-6 border-t border-slate-100 bg-slate-50/50">
-              <button onClick={() => setViewingInvoice(null)} className="w-full py-3 bg-[#991b1b] text-white font-black rounded-lg uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors">Đóng</button>
+              <button 
+                onClick={() => setViewingInvoice(null)} 
+                className="w-full py-3 bg-[#991b1b] text-white font-black rounded-lg uppercase md:text-sm text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors md:hidden"
+              >
+                Đóng
+              </button>
             </div>
           </div>
         </div>
@@ -606,21 +673,24 @@ export const Inventory: React.FC = () => {
       {/* Import Detail Modal (Shared) */}
       {viewingImport && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center md:p-4 p-0 bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-2xl md:rounded-xl rounded-none shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full md:h-auto md:max-h-[90vh]">
+          <div className="bg-white w-full max-w-5xl md:rounded-xl rounded-none shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full md:h-auto md:max-h-[90vh]">
             {/* Header */}
             <div className="p-6 border-b border-slate-100 flex justify-between items-start shrink-0">
               <div>
-                <h3 className="text-xl font-bold text-slate-800">Chi Tiết Nhập Kho</h3>
+                <h3 className="md:text-3xl text-xl font-bold text-slate-800">Chi Tiết Nhập Kho</h3>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-sm font-medium text-slate-500">{viewingImport.id}</span>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
+                  <span className="md:text-lg text-sm font-medium text-slate-500">{viewingImport.id}</span>
+                  <span className={`md:text-sm text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
                     viewingImport.status === 'DONE' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
                   }`}>
                     {viewingImport.status === 'DONE' ? 'Hoàn thành' : 'Phiếu tạm'}
                   </span>
                 </div>
               </div>
-              <button onClick={() => setViewingImport(null)} className="text-slate-400 hover:text-slate-600 transition-colors">
+              <button 
+                onClick={() => setViewingImport(null)} 
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
                 <X size={24} />
               </button>
             </div>
@@ -628,8 +698,8 @@ export const Inventory: React.FC = () => {
             <div className="p-6 overflow-y-auto flex-1 space-y-4">
               {/* Supplier & Date Box */}
               <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 flex justify-between items-center">
-                <span className="font-bold text-slate-700 uppercase">{viewingImport.supplier}</span>
-                <span className="text-xs text-slate-500">{viewingImport.date}</span>
+                <span className="md:text-xl font-bold text-slate-700 uppercase">{viewingImport.supplier}</span>
+                <span className="md:text-base text-xs text-slate-500">{viewingImport.date}</span>
               </div>
 
               {/* Items List */}
@@ -637,17 +707,17 @@ export const Inventory: React.FC = () => {
                 {viewingImport.items.map((item, idx) => (
                   <div key={idx} className="bg-slate-50/50 p-4 rounded-xl border border-slate-100 relative">
                     <div className="flex justify-between items-start mb-2">
-                      <h4 className="text-sm font-bold text-slate-800 uppercase">{item.name}</h4>
-                      <span className="text-blue-600 font-bold">{formatNumber(item.price * item.qty)}đ</span>
+                      <h4 className="md:text-lg text-sm font-bold text-slate-800 uppercase">{item.name}</h4>
+                      <span className="md:text-xl text-blue-600 font-bold">{formatNumber(item.price * item.qty)}đ</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-xs text-slate-500 font-medium">SL: {item.qty}</span>
-                      <span className="text-xs text-slate-400">Giá: {formatNumber(item.price)}đ</span>
+                      <span className="md:text-base text-xs text-slate-500 font-medium">SL: {item.qty}</span>
+                      <span className="md:text-base text-xs text-slate-400">Giá: {formatNumber(item.price)}đ</span>
                     </div>
                     {item.sn && (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {(typeof item.sn === 'string' ? item.sn.split(',') : item.sn).map((sn: string, sIdx: number) => (
-                          <span key={`${sn}-${sIdx}`} className="bg-orange-50 text-orange-600 text-[10px] font-bold px-2 py-1 rounded border border-orange-100">
+                          <span key={`${sn}-${sIdx}`} className="bg-orange-50 text-orange-600 md:text-sm text-[10px] font-bold px-2 py-1 rounded border border-orange-100">
                             {sn.trim()}
                           </span>
                         ))}
@@ -660,11 +730,11 @@ export const Inventory: React.FC = () => {
               {/* Summary Section */}
               <div className="pt-4 border-t border-slate-100">
                 <div className="flex justify-between items-end">
-                  <span className="text-sm font-bold text-slate-500 mb-1">Vốn nhập:</span>
+                  <span className="md:text-lg text-sm font-bold text-slate-500 mb-1">Vốn nhập:</span>
                   <div className="text-right">
-                    <p className="text-2xl font-bold text-blue-600">{formatNumber(viewingImport.total || 0)}đ</p>
+                    <p className="md:text-4xl text-2xl font-bold text-blue-600">{formatNumber(viewingImport.total || 0)}đ</p>
                     {viewingImport.debt > 0 && (
-                      <p className="text-xs font-bold text-red-500 mt-1">Nợ NCC: {formatNumber(viewingImport.debt)}đ</p>
+                      <p className="md:text-lg text-xs font-bold text-red-500 mt-1">Nợ NCC: {formatNumber(viewingImport.debt)}đ</p>
                     )}
                   </div>
                 </div>
@@ -673,21 +743,21 @@ export const Inventory: React.FC = () => {
 
             {/* Footer Actions */}
             <div className="p-6 border-t border-slate-100 grid grid-cols-3 md:grid-cols-4 gap-3 bg-slate-50/50 shrink-0">
-              <button className="flex items-center justify-center gap-2 py-2.5 border border-slate-200 rounded-lg text-slate-600 font-bold text-sm hover:bg-slate-50 transition-colors">
+              <button className="flex items-center justify-center gap-2 py-3 border border-slate-200 rounded-lg text-slate-600 font-bold md:text-base text-sm hover:bg-slate-50 transition-colors">
                 <RotateCcw size={18} /> Trả hàng
               </button>
               <button 
                 onClick={() => handleOpenImport(viewingImport)}
-                className="flex items-center justify-center gap-2 py-2.5 border border-slate-200 rounded-lg text-slate-600 font-bold text-sm hover:bg-slate-50 transition-colors"
+                className="flex items-center justify-center gap-2 py-3 border border-slate-200 rounded-lg text-slate-600 font-bold md:text-base text-sm hover:bg-slate-50 transition-colors"
               >
                 <ExternalLink size={18} /> Mở phiếu
               </button>
-              <button className="flex items-center justify-center gap-2 py-2.5 bg-blue-600 text-white rounded-lg font-bold text-sm hover:bg-blue-700 transition-colors shadow-md">
+              <button className="flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-lg font-bold md:text-base text-sm hover:bg-blue-700 transition-colors shadow-md">
                 <Printer size={18} /> In phiếu
               </button>
               <button 
                 onClick={() => setViewingImport(null)}
-                className="col-span-3 md:col-span-1 py-2.5 bg-[#991b1b] text-white font-black rounded-lg uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] shadow-lg shadow-red-100"
+                className="col-span-3 md:col-span-1 py-3 bg-[#991b1b] text-white font-black rounded-lg uppercase md:text-sm text-[10px] tracking-widest hover:bg-[#7f1d1d] shadow-lg shadow-red-100 md:hidden"
               >
                 Đóng
               </button>
@@ -699,38 +769,41 @@ export const Inventory: React.FC = () => {
       {/* Return Import Detail Modal */}
       {viewingReturnImport && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center md:p-4 p-0 bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-2xl md:rounded-xl rounded-none shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full md:h-auto md:max-h-[90vh]">
+          <div className="bg-white w-full max-w-5xl md:rounded-xl rounded-none shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full md:h-auto md:max-h-[90vh]">
             <div className="p-6 border-b border-slate-100 flex justify-between items-start shrink-0">
               <div>
-                <h3 className="text-xl font-bold text-slate-800">Chi Tiết Trả Hàng Nhập</h3>
+                <h3 className="md:text-3xl text-xl font-bold text-slate-800">Chi Tiết Trả Hàng Nhập</h3>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-sm font-medium text-slate-500">{viewingReturnImport.id}</span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase bg-red-100 text-red-700">
+                  <span className="md:text-lg text-sm font-medium text-slate-500">{viewingReturnImport.id}</span>
+                  <span className="md:text-sm text-[10px] font-bold px-2 py-0.5 rounded uppercase bg-red-100 text-red-700">
                     {viewingReturnImport.status === 'DONE' ? 'Hoàn thành' : 'Phiếu tạm'}
                   </span>
                 </div>
               </div>
-              <button onClick={() => setViewingReturnImport(null)} className="text-slate-400 hover:text-slate-600 transition-colors">
+              <button 
+                onClick={() => setViewingReturnImport(null)} 
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
                 <X size={24} />
               </button>
             </div>
 
             <div className="p-6 overflow-y-auto flex-1 space-y-4">
               <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 flex justify-between items-center">
-                <span className="font-bold text-slate-700 uppercase">{viewingReturnImport.supplier}</span>
-                <span className="text-xs text-slate-500">{viewingReturnImport.date}</span>
+                <span className="md:text-xl font-bold text-slate-700 uppercase">{viewingReturnImport.supplier}</span>
+                <span className="md:text-base text-xs text-slate-500">{viewingReturnImport.date}</span>
               </div>
 
               <div className="space-y-3">
                 {viewingReturnImport.items.map((item, idx) => (
                   <div key={idx} className="bg-slate-50/50 p-4 rounded-xl border border-slate-100">
                     <div className="flex justify-between items-start mb-2">
-                      <h4 className="text-sm font-bold text-slate-800 uppercase">{item.name}</h4>
-                      <span className="text-red-600 font-bold">{formatNumber(item.price * item.qty)}đ</span>
+                      <h4 className="md:text-lg text-sm font-bold text-slate-800 uppercase">{item.name}</h4>
+                      <span className="md:text-xl text-red-600 font-bold">{formatNumber(item.price * item.qty)}đ</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-xs text-slate-500 font-medium">SL: {item.qty}</span>
-                      <span className="text-xs text-slate-400">Giá: {formatNumber(item.price)}đ</span>
+                      <span className="md:text-base text-xs text-slate-500 font-medium">SL: {item.qty}</span>
+                      <span className="md:text-base text-xs text-slate-400">Giá: {formatNumber(item.price)}đ</span>
                     </div>
                   </div>
                 ))}
@@ -738,10 +811,10 @@ export const Inventory: React.FC = () => {
 
               <div className="pt-4 border-t border-slate-100">
                 <div className="flex justify-between items-end">
-                  <span className="text-sm font-bold text-slate-500 mb-1">Tổng tiền trả:</span>
+                  <span className="md:text-lg text-sm font-bold text-slate-500 mb-1">Tổng tiền trả:</span>
                   <div className="text-right">
-                    <p className="text-2xl font-bold text-red-600">{formatNumber(viewingReturnImport.total)}đ</p>
-                    <p className="text-xs font-bold text-slate-500 mt-1">Đã nhận: {formatNumber(viewingReturnImport.received)}đ</p>
+                    <p className="md:text-4xl text-2xl font-bold text-red-600">{formatNumber(viewingReturnImport.total)}đ</p>
+                    <p className="md:text-lg text-xs font-bold text-slate-500 mt-1">Đã nhận: {formatNumber(viewingReturnImport.received)}đ</p>
                   </div>
                 </div>
               </div>
@@ -750,7 +823,7 @@ export const Inventory: React.FC = () => {
             <div className="p-4 md:p-6 border-t border-slate-100 bg-slate-50/50 shrink-0">
               <button 
                 onClick={() => setViewingReturnImport(null)}
-                className="w-full py-3 bg-[#991b1b] text-white font-black rounded-lg uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors shadow-lg shadow-red-100"
+                className="w-full py-3 bg-[#991b1b] text-white font-black rounded-lg uppercase md:text-sm text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors shadow-lg shadow-red-100 md:hidden"
               >
                 Đóng
               </button>
@@ -762,43 +835,46 @@ export const Inventory: React.FC = () => {
       {/* Return Sales Detail Modal */}
       {viewingReturnSales && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center md:p-4 p-0 bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-2xl md:rounded-xl rounded-none shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full md:h-auto md:max-h-[90vh]">
+          <div className="bg-white w-full max-w-5xl md:rounded-xl rounded-none shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full md:h-auto md:max-h-[90vh]">
             <div className="p-6 border-b border-slate-100 flex justify-between items-start shrink-0">
               <div>
-                <h3 className="text-xl font-bold text-slate-800">Chi Tiết Khách Trả Hàng</h3>
+                <h3 className="md:text-3xl text-xl font-bold text-slate-800">Chi Tiết Khách Trả Hàng</h3>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-sm font-medium text-slate-500">{viewingReturnSales.id}</span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase bg-orange-100 text-orange-700">
+                  <span className="md:text-lg text-sm font-medium text-slate-500">{viewingReturnSales.id}</span>
+                  <span className="md:text-sm text-[10px] font-bold px-2 py-0.5 rounded uppercase bg-orange-100 text-orange-700">
                     {viewingReturnSales.status === 'DONE' ? 'Hoàn thành' : 'Phiếu tạm'}
                   </span>
                 </div>
               </div>
-              <button onClick={() => setViewingReturnSales(null)} className="text-slate-400 hover:text-slate-600 transition-colors">
+              <button 
+                onClick={() => setViewingReturnSales(null)} 
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
                 <X size={24} />
               </button>
             </div>
 
             <div className="p-6 overflow-y-auto flex-1 space-y-4">
               <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 flex justify-between items-center">
-                <span className="font-bold text-slate-700 uppercase">{viewingReturnSales.customer}</span>
-                <span className="text-xs text-slate-500">{viewingReturnSales.date}</span>
+                <span className="md:text-xl font-bold text-slate-700 uppercase">{viewingReturnSales.customer}</span>
+                <span className="md:text-base text-xs text-slate-500">{viewingReturnSales.date}</span>
               </div>
 
               <div className="space-y-3">
                 {viewingReturnSales.items.map((item, idx) => (
                   <div key={idx} className="bg-slate-50/50 p-4 rounded-xl border border-slate-100">
                     <div className="flex justify-between items-start mb-2">
-                      <h4 className="text-sm font-bold text-slate-800 uppercase">{item.name}</h4>
-                      <span className="text-orange-600 font-bold">{formatNumber(item.price * item.qty)}đ</span>
+                      <h4 className="md:text-lg text-sm font-bold text-slate-800 uppercase">{item.name}</h4>
+                      <span className="md:text-xl text-orange-600 font-bold">{formatNumber(item.price * item.qty)}đ</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-xs text-slate-500 font-medium">SL: {item.qty}</span>
-                      <span className="text-xs text-slate-400">Giá: {formatNumber(item.price)}đ</span>
+                      <span className="md:text-base text-xs text-slate-500 font-medium">SL: {item.qty}</span>
+                      <span className="md:text-base text-xs text-slate-400">Giá: {formatNumber(item.price)}đ</span>
                     </div>
                     {item.sn && (
                       <div className="mt-2 flex flex-wrap gap-1">
                         {(typeof item.sn === 'string' ? item.sn.split(',') : item.sn).map((sn: string, sIdx: number) => (
-                          <span key={sIdx} className="text-[8px] bg-white border border-slate-200 px-1 rounded text-slate-500 font-mono">
+                          <span key={sIdx} className="md:text-sm text-[8px] bg-white border border-slate-200 px-1 rounded text-slate-500 font-mono">
                             {sn.trim()}
                           </span>
                         ))}
@@ -810,10 +886,10 @@ export const Inventory: React.FC = () => {
 
               <div className="pt-4 border-t border-slate-100">
                 <div className="flex justify-between items-end">
-                  <span className="text-sm font-bold text-slate-500 mb-1">Tổng tiền trả khách:</span>
+                  <span className="md:text-lg text-sm font-bold text-slate-500 mb-1">Tổng tiền trả khách:</span>
                   <div className="text-right">
-                    <p className="text-2xl font-bold text-orange-600">{formatNumber(viewingReturnSales.total)}đ</p>
-                    <p className="text-xs font-bold text-slate-500 mt-1">Đã trả: {formatNumber(viewingReturnSales.paid)}đ</p>
+                    <p className="md:text-4xl text-2xl font-bold text-orange-600">{formatNumber(viewingReturnSales.total)}đ</p>
+                    <p className="md:text-lg text-xs font-bold text-slate-500 mt-1">Đã trả: {formatNumber(viewingReturnSales.paid)}đ</p>
                   </div>
                 </div>
               </div>
@@ -822,7 +898,7 @@ export const Inventory: React.FC = () => {
             <div className="p-4 md:p-6 border-t border-slate-100 bg-slate-50/50 shrink-0">
               <button 
                 onClick={() => setViewingReturnSales(null)}
-                className="w-full py-3 bg-[#991b1b] text-white font-black rounded-lg uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors shadow-lg shadow-red-100"
+                className="w-full py-3 bg-[#991b1b] text-white font-black rounded-lg uppercase md:text-sm text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors shadow-lg shadow-red-100 md:hidden"
               >
                 Đóng
               </button>
@@ -834,10 +910,13 @@ export const Inventory: React.FC = () => {
       {/* Add Product Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-0 md:p-4 bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-4xl md:rounded-xl rounded-none shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full md:max-h-[95vh]">
+          <div className="bg-white w-full max-w-6xl md:rounded-xl rounded-none shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-full md:max-h-[95vh]">
             <div className="flex justify-between items-center p-4 border-b border-slate-100 shrink-0">
-              <h3 className="text-lg font-bold text-slate-800 tracking-tight">{selectedProduct ? 'Cập nhật mặt hàng' : 'Thêm mặt hàng'}</h3>
-              <button onClick={handleCloseModal} className="w-8 h-8 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-200 transition-colors flex items-center justify-center">
+              <h3 className="md:text-2xl text-lg font-bold text-slate-800 tracking-tight">{selectedProduct ? 'Cập nhật mặt hàng' : 'Thêm mặt hàng'}</h3>
+              <button 
+                onClick={handleCloseModal} 
+                className="w-8 h-8 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-200 transition-colors flex items-center justify-center"
+              >
                 <X size={18} />
               </button>
             </div>
@@ -861,7 +940,7 @@ export const Inventory: React.FC = () => {
                   )}
                 </div>
                 <div className="flex-1 space-y-3">
-                  <p className="text-xs font-medium text-slate-500">Link ảnh sản phẩm</p>
+                  <p className="md:text-sm text-xs font-medium text-slate-500">Link ảnh sản phẩm</p>
                   <div className="flex flex-col sm:flex-row gap-2">
                     <div className="relative flex-1">
                       <input 
@@ -869,31 +948,31 @@ export const Inventory: React.FC = () => {
                         value={image || ''}
                         onChange={(e) => setImage(e.target.value)}
                         placeholder="Dán link ảnh tại đây..."
-                        className="w-full pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-400 shadow-sm"
+                        className="w-full pl-8 pr-3 py-3 bg-white border border-slate-200 rounded-lg md:text-base text-xs outline-none focus:border-blue-400 shadow-sm"
                       />
-                      <ExternalLink size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
+                      <ExternalLink size={14} className="absolute left-2.5 top-3.5 text-slate-400" />
                     </div>
                     <button 
                       onClick={() => setIsLibraryOpen(true)}
-                      className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
+                      className="px-4 py-3 bg-slate-900 text-white rounded-lg md:text-sm text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
                     >
                       <ImageIcon size={14} /> Chọn ảnh
                     </button>
                   </div>
-                  <p className="text-[10px] text-slate-400 italic">Nhập địa chỉ URL hoặc chọn ảnh từ thư viện Drive.</p>
+                  <p className="md:text-xs text-[10px] text-slate-400 italic">Nhập địa chỉ URL hoặc chọn ảnh từ thư viện Drive.</p>
                 </div>
               </div>
 
               <div className="flex items-center gap-2 bg-slate-200/50 p-1.5 rounded-xl w-full shrink-0">
                 <button 
                   onClick={() => setPType('product')}
-                  className={`flex-1 text-center py-2 rounded-lg transition-all font-bold text-sm ${pType === 'product' ? 'bg-blue-600 shadow-md text-white' : 'text-slate-500 hover:bg-slate-200'}`}
+                  className={`flex-1 text-center py-3 rounded-lg transition-all font-bold md:text-base text-sm ${pType === 'product' ? 'bg-blue-600 shadow-md text-white' : 'text-slate-500 hover:bg-slate-200'}`}
                 >
                   Hàng hóa
                 </button>
                 <button 
                   onClick={() => setPType('service')}
-                  className={`flex-1 text-center py-2 rounded-lg transition-all font-bold text-sm ${pType === 'service' ? 'bg-emerald-600 shadow-md text-white' : 'text-slate-500 hover:bg-slate-200'}`}
+                  className={`flex-1 text-center py-3 rounded-lg transition-all font-bold md:text-base text-sm ${pType === 'service' ? 'bg-emerald-600 shadow-md text-white' : 'text-slate-500 hover:bg-slate-200'}`}
                 >
                   Dịch vụ
                 </button>
@@ -901,35 +980,35 @@ export const Inventory: React.FC = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
-                  <label className="text-xs font-medium text-slate-500 ml-1">Tên hàng / dịch vụ</label>
+                  <label className="md:text-sm text-xs font-bold text-slate-500 ml-1">Tên hàng / dịch vụ</label>
                   <input 
                     type="text" 
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm" 
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl md:text-lg text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm font-bold" 
                     placeholder="VD: SSD SAMSUNG 1TB..." 
                   />
                 </div>
                 
                 <div>
-                  <label className="text-xs font-medium text-slate-500 ml-1">Giá bán lẻ (đ)</label>
+                  <label className="md:text-sm text-xs font-bold text-slate-500 ml-1">Giá bán lẻ (đ)</label>
                   <NumericFormat 
                     value={price}
                     onValueChange={(values) => setPrice(values.value)}
                     thousandSeparator="."
                     decimalSeparator=","
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm" 
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl md:text-xl text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm font-bold text-blue-600" 
                     placeholder="0" 
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-500 ml-1">Giá vốn (đ)</label>
+                  <label className="md:text-sm text-xs font-bold text-slate-500 ml-1 text-blue-600">Giá vốn (đ)</label>
                   <NumericFormat 
                     value={cost}
                     onValueChange={(values) => setCost(values.value)}
                     thousandSeparator="."
                     decimalSeparator=","
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-blue-600 outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm" 
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl md:text-xl text-sm text-blue-600 outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm font-bold" 
                     placeholder="0" 
                   />
                 </div>
@@ -937,83 +1016,114 @@ export const Inventory: React.FC = () => {
                 {pType === 'product' && (
                   <>
                     <div>
-                      <label className="text-xs font-medium text-slate-500 ml-1">Tồn hàng ban đầu</label>
+                      <label className="md:text-sm text-xs font-bold text-slate-500 ml-1">Tồn hàng ban đầu</label>
                       <input 
                         type="number" 
                         value={stock}
                         onChange={(e) => setStock(e.target.value)}
-                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm" 
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl md:text-lg text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm font-bold" 
                         placeholder="0" 
                       />
                     </div>
 
-                    <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200 shadow-sm mt-1">
+                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200 shadow-sm mt-1">
                       <div>
-                        <p className="text-xs font-medium text-slate-700">Quản lý Serial / IMEI</p>
-                        <p className="text-[10px] text-slate-400">Dùng cho sản phẩm có mã riêng</p>
+                        <p className="md:text-base text-xs font-bold text-slate-700">Quản lý Serial / IMEI</p>
+                        <p className="md:text-sm text-[10px] text-slate-400">Dùng cho sản phẩm có mã riêng</p>
                       </div>
                       <button 
                         onClick={() => setHasSerial(!hasSerial)}
-                        className={`w-10 h-5 rounded-full transition-colors relative ${hasSerial ? 'bg-blue-600' : 'bg-slate-300'}`}
+                        className={`w-12 h-6 rounded-full transition-colors relative ${hasSerial ? 'bg-blue-600' : 'bg-slate-300'}`}
                       >
-                        <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${hasSerial ? 'left-6' : 'left-1'}`} />
+                        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${hasSerial ? 'left-7' : 'left-1'}`} />
                       </button>
                     </div>
                   </>
                 )}
 
                 <div>
-                  <label className="text-xs font-medium text-slate-500 ml-1">Thời gian bảo hành (tháng)</label>
+                  <label className="md:text-sm text-xs font-bold text-slate-500 ml-1">Thời gian bảo hành (tháng)</label>
                   <input 
                     type="number" 
                     value={warrantyMonths}
                     onChange={(e) => setWarrantyMonths(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm" 
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl md:text-lg text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm font-bold" 
                     placeholder="0" 
                   />
                 </div>
 
                 <div>
-                  <label className="text-xs font-medium text-slate-500 ml-1">Đơn vị tính</label>
+                  <label className="md:text-sm text-xs font-bold text-slate-500 ml-1">Đơn vị tính</label>
                   <input 
                     type="text" 
                     value={unit}
                     onChange={(e) => setUnit(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm" 
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl md:text-lg text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm font-bold" 
                     placeholder="Cái, Bộ..." 
                   />
                 </div>
 
                 <div>
-                  <label className="text-xs font-medium text-slate-500 ml-1">Nhóm hàng</label>
+                  <label className="md:text-sm text-xs font-bold text-slate-500 ml-1">Nhóm hàng</label>
                   <input 
                     type="text" 
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm" 
+                    list="category-suggestions"
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl md:text-lg text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm font-bold" 
                     placeholder="Linh kiện..." 
                   />
+                  <datalist id="category-suggestions">
+                    {categories.map((c, i) => <option key={`${c.id}-${i}`} value={c.name} />)}
+                  </datalist>
                 </div>
 
                 <div>
-                  <label className="text-xs font-medium text-slate-500 ml-1">Thương hiệu</label>
+                  <label className="md:text-sm text-xs font-bold text-slate-500 ml-1">Thương hiệu</label>
                   <input 
                     type="text" 
                     value={brand}
                     onChange={(e) => setBrand(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm" 
+                    list="brand-suggestions"
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl md:text-lg text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm font-bold" 
                     placeholder="Samsung, Dell..." 
                   />
+                  <datalist id="brand-suggestions">
+                    {brands.map((b, i) => <option key={`${b.id}-${i}`} value={b.name} />)}
+                  </datalist>
                 </div>
 
                 <div>
-                  <label className="text-xs font-medium text-slate-500 ml-1">Dự kiến hết hàng</label>
+                  <label className="md:text-sm text-xs font-bold text-slate-500 ml-1">Dự kiến hết hàng</label>
                   <input 
                     type="date" 
                     value={expectedOutOfStock}
                     onChange={(e) => setExpectedOutOfStock(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm" 
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl md:text-lg text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm font-bold" 
                   />
+                </div>
+
+                <div>
+                  <label className="md:text-sm text-xs font-bold text-slate-500 ml-1">Cảnh báo tồn kho thấp</label>
+                  <input 
+                    type="number" 
+                    value={lowStockThreshold}
+                    onChange={(e) => setLowStockThreshold(e.target.value)}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl md:text-lg text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm font-bold" 
+                    placeholder="VD: 5"
+                  />
+                </div>
+
+                <div>
+                  <label className="md:text-sm text-xs font-bold text-slate-500 ml-1 text-emerald-600">Trạng thái</label>
+                  <select
+                    value={pStatus}
+                    onChange={(e) => setPStatus(e.target.value as any)}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl md:text-lg text-sm outline-none mt-1 focus:border-blue-400 focus:bg-white transition-all shadow-sm font-bold text-emerald-700"
+                  >
+                    <option value="Đang kinh doanh">⚡ Đang kinh doanh</option>
+                    <option value="Ngừng kinh doanh">🚫 Ngừng kinh doanh</option>
+                  </select>
                 </div>
               </div>
             </div>
@@ -1022,11 +1132,11 @@ export const Inventory: React.FC = () => {
               <button 
                 onClick={handleSave}
                 disabled={isSaving}
-                className="flex-1 bg-emerald-600 text-white py-3 md:py-4 rounded-xl font-bold shadow-lg shadow-emerald-200 active:scale-95 transition-all hover:bg-emerald-700 disabled:bg-slate-400 disabled:shadow-none flex items-center justify-center gap-2"
+                className="flex-1 bg-emerald-600 text-white py-4 md:py-5 rounded-xl font-black md:text-xl text-sm shadow-lg shadow-emerald-200 active:scale-95 transition-all hover:bg-emerald-700 disabled:bg-slate-400 disabled:shadow-none flex items-center justify-center gap-2 uppercase tracking-widest"
               >
                 {isSaving ? (
                   <>
-                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     {saveStatus || 'Đang xử lý...'}
                   </>
                 ) : (
@@ -1035,7 +1145,7 @@ export const Inventory: React.FC = () => {
               </button>
               <button 
                 onClick={handleCloseModal}
-                className="flex-1 py-3 md:py-4 bg-[#991b1b] text-white font-black rounded-lg uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors active:scale-95"
+                className="flex-1 py-3 md:py-4 bg-[#991b1b] text-white font-black rounded-lg uppercase text-[10px] tracking-widest hover:bg-[#7f1d1d] transition-colors active:scale-95 md:hidden"
               >
                 Đóng
               </button>

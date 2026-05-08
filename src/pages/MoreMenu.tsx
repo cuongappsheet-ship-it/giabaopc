@@ -22,7 +22,10 @@ import {
   Info,
   LogOut,
   Database,
-  Send
+  Send,
+  Wifi,
+  Camera,
+  CreditCard
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { useNavigate } from 'react-router-dom';
@@ -45,6 +48,7 @@ export const MoreMenu: React.FC = () => {
         { label: 'Đặt hàng', icon: <ClipboardList className="text-blue-500" />, path: '#' },
         { label: 'Trả hàng', icon: <RotateCcw className="text-blue-500" />, path: '/return-sales' },
         { label: 'Sổ quỹ', icon: <Wallet className="text-blue-500" />, path: '/cash-ledger' },
+        { label: 'Quản lý ví', icon: <CreditCard className="text-blue-500" />, path: '/wallets' },
       ]
     },
     {
@@ -59,6 +63,8 @@ export const MoreMenu: React.FC = () => {
         { label: 'Xuất hủy', icon: <Trash2 className="text-blue-500" />, path: '#' },
         { label: 'Phiếu bảo hành', icon: <ShieldCheck className="text-blue-500" />, path: '/maintenance' },
         { label: 'Công việc', icon: <ClipboardList className="text-blue-500" />, path: '/tasks' },
+        { label: 'Quản lý Wifi', icon: <Wifi className="text-blue-500" />, path: '/wifi' },
+        { label: 'Quản lý Camera', icon: <Camera className="text-blue-500" />, path: '/camera' },
         { label: 'Xuất dùng nội bộ', icon: <Package className="text-blue-500" />, path: '#' },
       ]
     },
@@ -68,6 +74,7 @@ export const MoreMenu: React.FC = () => {
         { label: 'Cài đặt bản in', icon: <Printer className="text-blue-500" />, path: '/print-settings' },
         { label: 'Cấu hình Telegram', icon: <Send className="text-blue-500" />, path: '/telegram-settings' },
         { label: 'Quản lý nhân viên', icon: <User className="text-blue-500" />, path: '/users' },
+        ...(currentUser?.role === 'ADMIN' ? [{ label: 'Quản lý Ví', icon: <Wallet className="text-blue-500" />, path: '/wallets' }] : [])
       ]
     }
   ];
@@ -139,7 +146,7 @@ export const MoreMenu: React.FC = () => {
         />
         <p className="text-xs text-slate-500">Phát triển bởi <strong className="text-slate-600">DigiKiot - Cuongtin.vn</strong></p>
         <p className="text-xs text-slate-500 mt-1">Số kỹ thuật: <strong className="text-slate-600">0931.113.048</strong></p>
-        <p className="text-[10px] text-slate-400 mt-2 font-mono bg-slate-200/50 px-2 py-0.5 rounded-full">Phiên bản V1.19426</p>
+        <p className="text-[10px] text-slate-400 mt-2 font-mono bg-slate-200/50 px-2 py-0.5 rounded-full">Phiên bản V1.{new Date().getDate()}{new Date().getMonth() + 1}{new Date().getFullYear().toString().slice(-2)}</p>
       </div>
     </div>
   );

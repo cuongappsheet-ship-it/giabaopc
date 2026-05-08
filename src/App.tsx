@@ -29,6 +29,9 @@ import { PrintSettings } from './pages/PrintSettings';
 import { TelegramSettings } from './pages/TelegramSettings';
 import Users from './pages/Users';
 import { MoreMenu } from './pages/MoreMenu';
+import { WifiManagement } from './pages/WifiManagement';
+import { CameraManagement } from './pages/CameraManagement';
+import { WalletManagement } from './pages/WalletManagement';
 import { requestNotificationPermission } from './lib/notification';
 
 import { ExternalSerials } from './pages/ExternalSerials';
@@ -74,6 +77,9 @@ const AppRoutes = () => {
           <Route path="reports" element={<Reports />} />
           <Route path="cash-ledger" element={<CashLedger />} />
           <Route path="maintenance" element={<Maintenance />} />
+          <Route path="wifi" element={<WifiManagement />} />
+          <Route path="camera" element={<CameraManagement />} />
+          <Route path="wallets" element={<WalletManagement />} />
           <Route path="tasks" element={<Tasks />} />
           <Route path="price-settings" element={<PriceSettings />} />
           <Route path="print-settings" element={<PrintSettings />} />

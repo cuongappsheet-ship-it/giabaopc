@@ -1,4 +1,4 @@
-const API_URL = 'https://script.google.com/macros/s/AKfycby_CYhPwlnAa9qmwMo6RpDhJfFpM6FTFe694l8_y_hQwN_QwMvDQW1zgkXwMXa5hpTbPQ/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbw9fB9wBGPiHkoO4qmVxyBl69VcDHyhObmYZnq8vew6wBoXn72AILTGw3KBWOuSvjGLnQ/exec';
 const IMAGE_API_URL = 'https://script.google.com/macros/s/AKfycbxd7cJ1aMqNOkw0qwHT4pzVZQ59xilIa_IpR5gkvSTAnKOQVXpWNoiHtGA6NnplRgzdew/exec';
 const IMAGE_SHEET_ID = '1BvCMwAq5zItV3fEqAy1saP7eTMQ66orrZ4CG6H_ecgM';
 
@@ -6,18 +6,24 @@ export const apiService = {
   // Đọc dữ liệu từ 1 sheet
   readSheet: async (sheetName: string) => {
     try {
-      let response;
-      if (sheetName === 'Image') {
-        const url = `${IMAGE_API_URL}?sheetId=${IMAGE_SHEET_ID}&page=1&pageSize=100`;
-        response = await fetch(url);
-      } else {
-        response = await fetch(API_URL, {
-          method: 'POST',
-          body: JSON.stringify({ action: 'read', sheet: sheetName }),
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' }
-        });
+      // Use IMAGE_API_URL for Image sheet requests, otherwise main API_URL
+      const url = sheetName === 'Image' 
+        ? `${IMAGE_API_URL}?sheetId=${IMAGE_SHEET_ID}&page=1&pageSize=100` 
+        : `${API_URL}?action=read&sheet=${sheetName}`;
+        
+      const response = await fetch(url, { redirect: "follow" });
+      const textResponse = await response.text();
+      let result;
+      try {
+        result = JSON.parse(textResponse);
+      } catch (e) {
+        if (textResponse.trim().startsWith('<!DOCTYPE') || textResponse.trim().startsWith('<html')) {
+          console.warn(`[API] Expected JSON but got HTML for ${sheetName}. The sheet might not exist in your Google Spreadsheet or there was a server error.`);
+          return [];
+        }
+        console.error(`Failed to parse JSON for ${sheetName}. Response was:`, textResponse.substring(0, 100));
+        return [];
       }
-      const result = await response.json();
       console.log(`[API] readSheet(${sheetName}) response:`, result);
       
       if (result.success === true || result.status === 'success' || result.data) {

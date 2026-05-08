@@ -1,14 +1,31 @@
 import React, { useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Store, Search, Truck, Bell, Settings, ChevronDown, ShoppingCart, Home, Box, FileText, Users, Package, History, RotateCcw, ClipboardList, PlusCircle, Tag, ShieldCheck, Wallet, LogOut, Menu, ArrowLeftRight, Printer, DollarSign, Wrench, Send } from 'lucide-react';
+import { Store, Search, Truck, Bell, Settings, ChevronDown, ShoppingCart, Home, Box, FileText, Users, Package, History, RotateCcw, ClipboardList, PlusCircle, Tag, ShieldCheck, Wallet, LogOut, Menu, ArrowLeftRight, Printer, DollarSign, Wrench, Send, Wifi, RefreshCw } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
+import { useMobileBackModal } from '../hooks/useMobileBackModal';
 
 export const Layout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { currentUser, logout } = useAppContext();
+  const { currentUser, logout, syncData, products } = useAppContext();
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  useMobileBackModal(activeDropdown !== null, () => setActiveDropdown(null));
+  useMobileBackModal(showUserMenu, () => setShowUserMenu(false));
+  useMobileBackModal(showNotifications, () => setShowNotifications(false));
+
+  const handleSync = async () => {
+    setIsSyncing(true);
+    await syncData();
+    setIsSyncing(false);
+  };
+
+  const lowStockProducts = React.useMemo(() => {
+    return products?.filter(p => (p.status || 'Đang kinh doanh') === 'Đang kinh doanh' && !p.isService && p.stock !== null && p.stock < (p.lowStockThreshold ?? 5)) || [];
+  }, [products]);
 
   // Scroll to top on route change
   React.useEffect(() => {
@@ -31,11 +48,14 @@ export const Layout: React.FC = () => {
     if (currentPath === '/cash-ledger') return 'Sổ quỹ';
     if (currentPath === '/reports') return 'Báo cáo';
     if (currentPath === '/maintenance') return 'Bảo hành, sửa chữa';
+    if (currentPath === '/wifi') return 'Quản lý Wifi';
+    if (currentPath === '/camera') return 'Quản lý Camera';
     if (currentPath === '/price-settings') return 'Thiết lập giá';
     if (currentPath === '/users') return 'Người dùng';
     if (currentPath === '/print-settings') return 'Cài đặt bản in';
     if (currentPath === '/tasks') return 'Quản lý công việc';
     if (currentPath === '/external-serials') return 'External Serial';
+    if (currentPath === '/wallets') return 'Quản lý Ví';
     return 'Hệ thống';
   };
 
@@ -79,6 +99,13 @@ export const Layout: React.FC = () => {
             { label: 'Nhập hàng', path: '/import-history', icon: <History size={14} /> },
             { label: 'Trả hàng nhập', path: '/return-import', icon: <RotateCcw size={14} /> },
           ]
+        },
+        {
+          title: 'Tài chính',
+          items: [
+            { label: 'Sổ quỹ', path: '/cash-ledger', icon: <Wallet size={14} /> },
+            { label: 'Quản lý Ví', path: '/wallets', icon: <Wallet size={14} /> },
+          ]
         }
       ]
     },
@@ -95,10 +122,45 @@ export const Layout: React.FC = () => {
         }
       ]
     },
-    { path: '/maintenance', label: 'Bảo hành, sửa chữa', type: 'link' },
+    { 
+      label: 'Dịch vụ', 
+      type: 'dropdown',
+      id: 'dich-vu',
+      sections: [
+        {
+          items: [
+            { label: 'Bảo hành, sửa chữa', path: '/maintenance', icon: <Wrench size={14} /> },
+            { label: 'Quản lý Wifi', path: '/wifi', icon: <Wifi size={14} /> },
+            { label: 'Quản lý Camera', path: '/camera', icon: <ShieldCheck size={14} /> },
+          ]
+        }
+      ]
+    },
     { path: '/tasks', label: 'Công việc', type: 'link' },
-    { path: '/cash-ledger', label: 'Sổ quỹ', type: 'link' },
-    { path: '/reports', label: 'Báo cáo', type: 'link' },
+    { 
+      label: 'Báo cáo', 
+      type: 'dropdown',
+      id: 'bao-cao',
+      sections: [
+        {
+          items: [
+            { label: 'Cuối ngày', path: '/reports?tab=end_of_day', icon: <ClipboardList size={14} /> },
+            { label: 'Bán hàng', path: '/reports?tab=sales', icon: <ShoppingCart size={14} /> },
+            { label: 'Đặt hàng', path: '/reports?tab=orders', icon: <Package size={14} /> },
+            { label: 'Hàng hóa', path: '/reports?tab=inventory', icon: <Box size={14} /> },
+            { label: 'Khách hàng', path: '/reports?tab=customers', icon: <Users size={14} /> },
+          ]
+        },
+        {
+          items: [
+            { label: 'Nhà cung cấp', path: '/reports?tab=suppliers', icon: <Truck size={14} /> },
+            { label: 'Nhân viên', path: '/reports?tab=staff', icon: <Users size={14} /> },
+            { label: 'Kênh bán hàng', path: '/reports?tab=channels', icon: <Store size={14} /> },
+            { label: 'Tài chính', path: '/reports?tab=finance', icon: <DollarSign size={14} /> },
+          ]
+        }
+      ]
+    },
     ...(currentUser?.role === 'ADMIN' ? [{
       label: 'Thiết lập',
       type: 'dropdown',
@@ -158,6 +220,15 @@ export const Layout: React.FC = () => {
             </Link>
             
             <div className="flex items-center gap-4 md:gap-6">
+              <button
+                onClick={handleSync}
+                disabled={isSyncing}
+                title="Đồng bộ dữ liệu"
+                className={`p-2 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 transition-colors border border-blue-100 ${isSyncing ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                <RefreshCw size={16} className={isSyncing ? 'animate-spin' : ''} />
+              </button>
+              
               {/* Mobile Title Replacement for Icons */}
               <div className="md:hidden">
                 <span className="text-sm font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
@@ -165,17 +236,49 @@ export const Layout: React.FC = () => {
                 </span>
               </div>
 
-              <div className="hidden md:flex relative text-slate-600">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <input 
-                  type="text" 
-                  placeholder="Tìm kiếm nhanh (F3)..." 
-                  className="bg-slate-100 hover:bg-slate-200/80 focus:bg-white focus:ring-2 focus:ring-blue-100 px-9 py-2.5 rounded-lg text-[13px] font-medium outline-none w-[420px] transition-all border border-slate-200/50 focus:border-blue-400" 
-                />
-              </div>
+
               <div className="hidden md:flex items-center gap-5 text-slate-500">
                 <Truck className="cursor-pointer hover:text-blue-600 transition-colors" size={18} />
-                <Bell className="cursor-pointer hover:text-blue-600 transition-colors" size={18} />
+                <div className="relative cursor-pointer" onClick={() => setShowNotifications(!showNotifications)}>
+                  <Bell className={`hover:text-blue-600 transition-colors ${lowStockProducts.length > 0 ? 'animate-ring-delay' : ''}`} size={18} />
+                  {lowStockProducts.length > 0 && (
+                    <span className="absolute -top-2 -right-2 min-w-[20px] h-[20px] px-1 bg-red-500 text-white rounded-full text-[10px] flex items-center justify-center font-bold border-2 border-white leading-none">
+                      {lowStockProducts.length > 99 ? '99+' : lowStockProducts.length}
+                    </span>
+                  )}
+                  {showNotifications && (
+                    <div className="absolute top-full right-0 mt-3 w-80 bg-white rounded-xl shadow-2xl py-2 z-50 border border-slate-200">
+                      <div className="px-4 py-2 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 rounded-t-lg">
+                        <h4 className="font-bold text-slate-800 text-sm">Thông báo ({lowStockProducts.length})</h4>
+                      </div>
+                      <div className="max-h-[300px] overflow-y-auto">
+                        {lowStockProducts.length > 0 ? (
+                          lowStockProducts.map(p => (
+                            <Link key={p.id} to={`/inventory?search=${encodeURIComponent(p.id)}`} className="flex items-start gap-3 p-3 hover:bg-rose-50/50 border-b border-slate-50 transition-colors last:border-0" onClick={() => setShowNotifications(false)}>
+                              <div className="w-8 h-8 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                                {p.image ? (
+                                  <img src={p.image} alt={p.name} className="w-full h-full object-cover" onError={(e) => {
+                                    (e.target as HTMLImageElement).style.display = 'none';
+                                    (e.target as HTMLImageElement).parentElement!.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-box"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>';
+                                  }} />
+                                ) : (
+                                  <Box size={14} />
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold text-slate-800 truncate">{p.name}</p>
+                                <p className="text-[10px] font-medium text-slate-500 truncate">{p.id}</p>
+                                <p className="text-xs font-black text-rose-600 mt-1">Tồn kho hiện tại: {p.stock}</p>
+                              </div>
+                            </Link>
+                          ))
+                        ) : (
+                          <div className="p-4 text-center text-sm text-slate-500">Không có thông báo mới</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
                 <Settings className="cursor-pointer hover:text-blue-600 transition-colors" size={18} />
               </div>
               <div 

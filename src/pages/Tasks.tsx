@@ -32,8 +32,9 @@ import {
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { Task, TelegramSettings, Customer, Invoice, MaintenanceRecord } from '../types';
-import { formatDateTime } from '../lib/utils';
+import { formatDateTime, parseDateString, smartParseDate } from '../lib/utils';
 import { generateId } from '../lib/idUtils';
+import { useMobileBackModal } from '../hooks/useMobileBackModal';
 import { motion, AnimatePresence } from 'motion/react';
 
 export const Tasks: React.FC = () => {
@@ -54,7 +55,7 @@ export const Tasks: React.FC = () => {
   const location = useLocation();
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<Task['status'] | 'ALL'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<Task['status'] | 'ALL' | 'NOT_COMPLETED'>('NOT_COMPLETED');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [selectedTaskDetail, setSelectedTaskDetail] = useState<Task | null>(null);
@@ -136,16 +137,8 @@ export const Tasks: React.FC = () => {
   // Helper to format time ago
   const getTimeAgo = (dateStr: string) => {
     try {
-      let date: Date;
-      if (dateStr.includes('/')) {
-        // Handle HH:mm:ss DD/MM/YYYY
-        const [time, datePart] = dateStr.split(' ');
-        const [day, month, year] = datePart.split('/');
-        const [hour, min, sec] = time.split(':');
-        date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(min), Number(sec));
-      } else {
-        date = new Date(dateStr);
-      }
+      const date = smartParseDate(dateStr);
+      if (isNaN(date.getTime())) return { text: dateStr, color: 'text-slate-400' };
 
       const diffInMs = now.getTime() - date.getTime();
       const diffInSecs = Math.floor(diffInMs / 1000);
@@ -154,8 +147,8 @@ export const Tasks: React.FC = () => {
 
       const color = diffInHours < 24 ? 'text-emerald-500' : 'text-red-500';
 
-      if (diffInMins < 1) return { text: `${diffInSecs} giây trước`, color };
-      if (diffInMins < 60) return { text: `${diffInMins} phút ${diffInSecs % 60} giây trước`, color };
+      if (diffInSecs < 60) return { text: `${Math.max(0, diffInSecs)} giây trước`, color };
+      if (diffInMins < 60) return { text: `${diffInMins} phút trước`, color };
       
       if (diffInHours < 24) return { text: `${diffInHours} giờ trước`, color };
       
@@ -165,6 +158,33 @@ export const Tasks: React.FC = () => {
       return { text: date.toLocaleDateString('vi-VN'), color };
     } catch (e) {
       return { text: dateStr, color: 'text-slate-400' };
+    }
+  };
+
+  const formatTaskDuration = (startStr: string, endStr: string | number) => {
+    try {
+      const s = parseDateString(startStr);
+      const e = typeof endStr === 'number' ? endStr : parseDateString(endStr);
+      if (!s || !e || isNaN(s) || isNaN(e)) return '';
+      
+      // Handle the case where end might be slightly before start due to clock drift or parsing edge cases
+      const diffInMs = Math.abs(e - s);
+      const diffInMins = Math.floor(diffInMs / 60000);
+      const diffInHours = Math.floor(diffInMins / 60);
+      const diffInDays = Math.floor(diffInHours / 24);
+
+      if (diffInDays > 0) {
+        return `${diffInDays} ngày ${diffInHours % 24 > 0 ? `${diffInHours % 24} giờ` : ''}`;
+      }
+      if (diffInHours > 0) {
+        return `${diffInHours} giờ ${diffInMins % 60 > 0 ? `${diffInMins % 60} phút` : ''}`;
+      }
+      if (diffInMins > 0) {
+        return `${diffInMins} phút`;
+      }
+      return `1 phút`;
+    } catch {
+      return '';
     }
   };
 
@@ -180,6 +200,11 @@ export const Tasks: React.FC = () => {
   };
 
   const handleSave = () => {
+    if (!assignedTo) {
+      alert('Vui lòng chọn nhân viên nhận việc để hiển thị thời gian nhé!');
+      return;
+    }
+
     const customer = customers.find(c => c.id === customerId);
     const finalTitle = customer ? customer.name : 'Công việc mới';
 
@@ -213,11 +238,30 @@ export const Tasks: React.FC = () => {
     resetForm();
   };
 
+  const getPriorityWeight = (p: Task['priority']) => {
+    switch (p) {
+      case 'CRITICAL': return 4;
+      case 'HIGH': return 3;
+      case 'MEDIUM': return 2;
+      case 'LOW': return 1;
+      default: return 0;
+    }
+  };
+
   const filteredTasks = tasks.filter(t => {
     const matchesSearch = t.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       t.description.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'ALL' || t.status === statusFilter;
+    const matchesStatus = statusFilter === 'ALL' 
+      ? true 
+      : statusFilter === 'NOT_COMPLETED' 
+        ? t.status !== 'COMPLETED' 
+        : t.status === statusFilter;
     return matchesSearch && matchesStatus;
+  }).sort((a, b) => {
+    const priorityDiff = getPriorityWeight(b.priority) - getPriorityWeight(a.priority);
+    if (priorityDiff !== 0) return priorityDiff;
+    
+    return parseDateString(b.createdAt) - parseDateString(a.createdAt);
   });
 
   const getPriorityColor = (p: Task['priority']) => {
@@ -242,6 +286,12 @@ export const Tasks: React.FC = () => {
     return <MapPin size={16} fill="currentColor" className="text-rose-500" />;
   };
 
+  useMobileBackModal(isModalOpen, () => setIsModalOpen(false)); // auto-injected
+  useMobileBackModal(showCustomerResults, () => setShowCustomerResults(false)); // auto-injected
+  useMobileBackModal(!!selectedTaskDetail, () => setSelectedTaskDetail(null));
+  useMobileBackModal(!!statusConfirm, () => setStatusConfirm(null));
+  useMobileBackModal(!!editingTask, () => setEditingTask(null));
+
   return (
     <div className="flex flex-col h-full bg-slate-50 relative overflow-hidden">
       {/* Header */}
@@ -255,7 +305,7 @@ export const Tasks: React.FC = () => {
           </h1>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
             <button 
-              onClick={() => setStatusFilter('ALL')}
+              onClick={() => setStatusFilter('NOT_COMPLETED')}
               className="text-[10px] font-black text-rose-600 uppercase tracking-tight flex items-center gap-1 hover:opacity-80 transition-opacity"
             >
               <ClipboardList size={12} />
@@ -301,6 +351,12 @@ export const Tasks: React.FC = () => {
       {/* Filters Bar - Compact for Mobile */}
       <div className="bg-white border-b border-slate-100 px-4 md:px-6 py-1.5 flex items-center gap-1.5 overflow-x-auto custom-scrollbar shrink-0 scroll-smooth no-scrollbar">
         <button 
+          onClick={() => setStatusFilter('NOT_COMPLETED')}
+          className={`px-3 py-1.5 md:py-1.5 rounded-full text-[9px] md:text-[10px] font-black whitespace-nowrap transition-all ${statusFilter === 'NOT_COMPLETED' ? 'bg-blue-600 text-white shadow-md shadow-blue-100' : 'text-slate-500 hover:bg-slate-100'}`}
+        >
+          CÒN LẠI ({tasks.filter(t => t.status !== 'COMPLETED').length})
+        </button>  
+        <button 
           onClick={() => setStatusFilter('ALL')}
           className={`px-3 py-1.5 md:py-1.5 rounded-full text-[9px] md:text-[10px] font-black whitespace-nowrap transition-all ${statusFilter === 'ALL' ? 'bg-blue-600 text-white shadow-md shadow-blue-100' : 'text-slate-500 hover:bg-slate-100'}`}
         >
@@ -325,7 +381,8 @@ export const Tasks: React.FC = () => {
 
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto p-4 md:p-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {/* Mobile Grid View */}
+        <div className="grid grid-cols-1 md:hidden gap-4">
           <AnimatePresence mode="popLayout">
             {filteredTasks.length === 0 ? (
               <div className="col-span-full py-20 flex flex-col items-center justify-center text-slate-300">
@@ -341,11 +398,7 @@ export const Tasks: React.FC = () => {
                 </button>
               </div>
             ) : (
-              filteredTasks.sort((a, b) => {
-                const priorityOrder = { 'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3 };
-                const statusOrder = { 'OPEN': 0, 'TODO': 1, 'ACCEPTED': 2, 'IN_PROGRESS': 3, 'COMPLETED': 4, 'CANCELLED': 5 };
-                return statusOrder[a.status] - statusOrder[b.status] || priorityOrder[a.priority] - priorityOrder[b.priority];
-              }).map(task => (
+              filteredTasks.map(task => (
                 <motion.div 
                   layout
                   initial={{ opacity: 0, y: 10 }}
@@ -399,9 +452,9 @@ export const Tasks: React.FC = () => {
                         <a 
                           href={`tel:${customers.find(c => c.id === task.customerId)?.phone}`}
                           onClick={(e) => e.stopPropagation()}
-                          className="flex-1 py-2 bg-blue-50 text-blue-600 rounded-xl text-[10px] font-black hover:bg-blue-100 transition-all flex items-center justify-center gap-1.5"
+                          className="flex-1 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black hover:bg-emerald-700 transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-100 active:scale-95"
                         >
-                          <Phone size={12} /> Gọi khách
+                          <Phone size={12} className="fill-white" /> Gọi khách (SIM)
                         </a>
                         <a 
                           href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(customers.find(c => c.id === task.customerId)?.location || '')}`}
@@ -433,6 +486,12 @@ export const Tasks: React.FC = () => {
                              {getTimeRemaining(task.dueDate)?.text}
                            </div>
                          )}
+                         {task.status === 'COMPLETED' && task.completedAt && formatTaskDuration(task.createdAt, task.completedAt) && (
+                           <div className="text-[9px] font-black italic flex items-center gap-1 text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-100">
+                             <CheckCircle2 size={10} />
+                             {formatTaskDuration(task.createdAt, task.completedAt)}
+                           </div>
+                         )}
                        </div>
                        <div className={`px-2 py-0.5 rounded-full text-[9px] font-black ${getPriorityColor(task.priority)}`}>
                          {task.priority === 'CRITICAL' ? 'Khẩn cấp' : task.priority === 'HIGH' ? 'Cao' : task.priority === 'MEDIUM' ? 'Trung bình' : 'Thấp'}
@@ -448,9 +507,16 @@ export const Tasks: React.FC = () => {
                           {task.assignedTo || 'Chưa giao'}
                         </span>
                       </div>
-                      <div className={`flex items-center gap-1 text-[9px] font-black italic ${getTimeAgo(task.createdAt).color}`}>
-                        {getTimeAgo(task.createdAt).text} ({formatDateTime(task.createdAt)})
-                      </div>
+                      {task.status === 'COMPLETED' && task.completedAt && formatTaskDuration(task.createdAt, task.completedAt) ? (
+                        <div className="flex items-center gap-1 text-[9px] font-black italic text-emerald-600">
+                          Hoàn thành trong {formatTaskDuration(task.createdAt, task.completedAt)}
+                        </div>
+                      ) : (
+                        <div className={`flex items-center gap-1 text-[9px] font-black italic ${getTimeAgo(task.createdAt).color}`}>
+                          <Clock size={10} />
+                          {getTimeAgo(task.createdAt).text}
+                        </div>
+                      )}
                     </div>
                   </div>
                   {task.description && (
@@ -464,6 +530,156 @@ export const Tasks: React.FC = () => {
               ))
             )}
           </AnimatePresence>
+        </div>
+
+        {/* Desktop Table View */}
+        <div className="hidden md:block bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden min-w-[1000px]">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Khách hàng / Công việc</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider w-[180px]">Nhân viên</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider w-[140px]">Ưu tiên</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider w-[220px]">Thời gian</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider w-[160px]">Trạng thái</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider w-[120px] text-right">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredTasks.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-20 text-center">
+                    <div className="flex flex-col items-center justify-center text-slate-300">
+                      <ClipboardList size={40} className="mb-2 opacity-20" />
+                      <p className="text-sm font-bold italic">Không tìm thấy công việc nào</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                filteredTasks.map(task => {
+                  const customer = customers.find(c => c.id === task.customerId);
+                  return (
+                    <tr 
+                      key={task.id} 
+                      className="hover:bg-blue-50/30 transition-colors group cursor-pointer"
+                      onClick={() => {
+                        setSelectedTaskDetail(task);
+                        if (task.status === 'TODO') {
+                          updateTask(task.id, { ...task, status: 'ACCEPTED' });
+                        }
+                      }}
+                    >
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-black text-slate-800 leading-tight group-hover:text-blue-700 transition-colors">{task.title}</p>
+                          </div>
+                          <p className="text-[11px] text-slate-400 font-bold mt-0.5 line-clamp-1">{task.description || 'Không có mô tả chi tiết'}</p>
+                          {customer && (
+                            <div className="flex items-center gap-2 mt-2">
+                              <a 
+                                href={`tel:${customer.phone}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-[9px] font-black text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded-lg flex items-center gap-1 hover:bg-emerald-100 transition-colors"
+                              >
+                                <Phone size={10} className="fill-emerald-600 text-transparent" /> {customer.phone}
+                              </a>
+                              <a 
+                                href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(customer.location || '')}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-[9px] font-black text-blue-600 bg-blue-50 border border-blue-100 px-2 py-1 rounded-lg flex items-center gap-1 hover:bg-blue-100 transition-colors"
+                              >
+                                <Navigation size={10} className="fill-blue-600 text-transparent" /> Chỉ đường
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 border-2 border-white shadow-sm">
+                            <User size={12} />
+                          </div>
+                          <span className="text-xs font-black text-slate-600">
+                            {task.assignedTo || 'Chưa giao'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-black ${getPriorityColor(task.priority)}`}>
+                          {task.priority === 'CRITICAL' ? 'Khẩn cấp' : task.priority === 'HIGH' ? 'Cao' : task.priority === 'MEDIUM' ? 'Trung bình' : 'Thấp'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-bold">
+                            <Calendar size={12} />
+                            <span>{task.dueDate ? formatDateTime(task.dueDate) : 'Không thời hạn'}</span>
+                          </div>
+                          {task.status !== 'COMPLETED' ? (
+                            <div className={`text-[10px] font-black italic flex items-center gap-1 ${task.dueDate ? getTimeRemaining(task.dueDate)?.color : getTimeAgo(task.createdAt).color}`}>
+                              <Clock size={11} />
+                              {task.dueDate ? getTimeRemaining(task.dueDate)?.text : getTimeAgo(task.createdAt).text}
+                            </div>
+                          ) : (
+                            task.completedAt && (
+                              <div className="text-[10px] font-black italic flex items-center gap-1 text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-lg border border-emerald-100 w-fit">
+                                <CheckCircle2 size={11} />
+                                {formatTaskDuration(task.createdAt, task.completedAt)}
+                              </div>
+                            )
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          {task.status === 'COMPLETED' ? (
+                            <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-full">
+                              <CheckCircle2 size={12} className="fill-emerald-600 text-white" />
+                              <span className="text-[10px] font-black uppercase">Hoàn thành</span>
+                            </div>
+                          ) : task.status === 'CANCELLED' ? (
+                            <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 text-slate-400 rounded-full">
+                              <X size={12} />
+                              <span className="text-[10px] font-black uppercase">Đã hủy</span>
+                            </div>
+                          ) : task.status === 'IN_PROGRESS' ? (
+                            <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 text-white rounded-full shadow-sm shadow-emerald-100">
+                              <Clock size={12} className="animate-pulse" />
+                              <span className="text-[10px] font-black uppercase tracking-tight">Đang làm</span>
+                            </div>
+                          ) : (
+                            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full border ${task.status === 'TODO' ? 'bg-orange-50 text-orange-500 border-orange-100' : 'bg-blue-50 text-blue-500 border-blue-100'}`}>
+                              <MapPin size={12} fill="currentColor" />
+                              <span className="text-[10px] font-black uppercase">{task.status === 'TODO' ? 'Chưa nhận' : 'Đã nhận'}</span>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); handleEdit(task); }}
+                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+                          >
+                            <Edit3 size={16} />
+                          </button>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); if(confirm('Xóa công việc này?')) deleteTask(task.id); }}
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -689,9 +905,10 @@ export const Tasks: React.FC = () => {
               </button>
               <button 
                 onClick={handleSave}
-                className="flex-[2] py-3.5 bg-blue-600 text-white rounded-2xl font-black text-[11px] shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95 flex items-center justify-center gap-2"
+                disabled={!assignedTo}
+                className={`flex-[2] py-3.5 rounded-2xl font-black text-[11px] flex items-center justify-center gap-2 transition-all active:scale-95 ${!assignedTo ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white shadow-lg shadow-blue-200 hover:bg-blue-700'}`}
               >
-                <div className="w-5 h-5 bg-white/20 rounded-full flex items-center justify-center">
+                <div className={`w-5 h-5 rounded-full flex items-center justify-center ${!assignedTo ? 'bg-slate-300' : 'bg-white/20'}`}>
                   <ArrowRight size={14} />
                 </div>
                 {editingTask ? 'Cập nhật ngay' : 'Xác nhận tạo việc'}
@@ -779,7 +996,10 @@ export const Tasks: React.FC = () => {
                 <section className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div className="space-y-4">
                     <div className="space-y-1">
-                      <h4 className="text-[11px] font-black text-slate-400">Nội dung chi tiết</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-[11px] font-black text-slate-400">Nội dung chi tiết</h4>
+                        <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded italic">#{selectedTaskDetail.id}</span>
+                      </div>
                       <h2 className="text-xl font-black text-slate-800 tracking-tight">{selectedTaskDetail.title}</h2>
                       <p className="text-base text-slate-600 font-medium leading-relaxed whitespace-pre-wrap mt-2">
                         {selectedTaskDetail.description || 'Không có mô tả chi tiết'}
@@ -801,6 +1021,23 @@ export const Tasks: React.FC = () => {
                             <span>{selectedTaskDetail.assignedTo || 'Chưa giao'}</span>
                          </div>
                        </div>
+                       {selectedTaskDetail.status === 'COMPLETED' && selectedTaskDetail.completedAt && formatTaskDuration(selectedTaskDetail.createdAt, selectedTaskDetail.completedAt) ? (
+                         <div className="space-y-1">
+                           <p className="text-[10px] font-black text-emerald-600 leading-none uppercase tracking-tight">Hoàn thành trong</p>
+                           <div className="flex items-center gap-2 mt-1 text-emerald-700 font-bold">
+                              <CheckCircle2 size={14} />
+                              <span>{formatTaskDuration(selectedTaskDetail.createdAt, selectedTaskDetail.completedAt)}</span>
+                           </div>
+                         </div>
+                       ) : (
+                         <div className="space-y-1">
+                           <p className="text-[10px] font-black text-red-500 leading-none uppercase tracking-tight">Thời gian đã qua</p>
+                           <div className="flex items-center gap-2 mt-1 text-red-600 font-bold">
+                              <Clock size={14} />
+                              <span>{formatTaskDuration(selectedTaskDetail.createdAt, now.getTime())} trước</span>
+                           </div>
+                         </div>
+                       )}
                     </div>
                   </div>
 
@@ -816,10 +1053,15 @@ export const Tasks: React.FC = () => {
                             <div className="space-y-3">
                               <div>
                                 <p className="text-sm font-black text-slate-800 leading-none">{customer.name}</p>
-                                <div className="flex items-center gap-2 mt-2">
-                                  <a href={`tel:${customer.phone}`} className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline">
-                                    <Phone size={12} /> {customer.phone}
+                                <div className="flex flex-wrap items-center gap-2 mt-2">
+                                  <a href={`tel:${customer.phone}`} className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-xl text-xs font-bold hover:bg-emerald-100 transition-all active:scale-95 border border-emerald-100">
+                                    <Phone size={12} className="fill-emerald-600 text-transparent" /> {customer.phone} (Gọi SIM)
                                   </a>
+                                  {customer.phone2 && (
+                                    <a href={`tel:${customer.phone2}`} className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-xl text-xs font-bold hover:bg-blue-100 transition-all active:scale-95 border border-blue-100">
+                                      <Phone size={12} className="fill-blue-600 text-transparent" /> {customer.phone2} (SĐT 2)
+                                    </a>
+                                  )}
                                 </div>
                               </div>
                               

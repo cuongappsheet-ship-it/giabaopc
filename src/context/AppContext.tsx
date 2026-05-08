@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { AppState, Product, Customer, Supplier, Invoice, ImportOrder, CashTransaction, POSDraft, ImportDraft, MaintenanceRecord, MaintenanceTransfer, ReturnImportOrder, ReturnSalesOrder, User, Serial, StockCard, PrintSettings, ExternalSerial, ImageItem, Task, TelegramSettings } from '../types';
+import { AppState, Product, Customer, Supplier, Invoice, ImportOrder, CashTransaction, POSDraft, ImportDraft, MaintenanceRecord, MaintenanceTransfer, ReturnImportOrder, ReturnSalesOrder, User, Serial, StockCard, PrintSettings, ExternalSerial, ImageItem, Task, TelegramSettings, WifiRecord, CameraAccountRecord, Wallet } from '../types';
 import { apiService } from '../services/api';
 import { generateId } from '../lib/idUtils';
+import { formatDateTime, padPhone, formatSnForDb, parseSnFromDb, parseFormattedNumber } from '../lib/utils';
 import { sendNotification, sendTelegramMessage } from '../lib/notification';
 
 interface AppContextProps extends AppState {
@@ -24,7 +25,7 @@ interface AppContextProps extends AppState {
   removeSerial: (sn: string) => void;
   addCashTransaction: (transaction: CashTransaction) => void;
   setPOSDraft: (draft: POSDraft) => void;
-  setImportDraft: (draft: ImportDraft) => void;
+  setImportDraft: (draft: ImportDraft | undefined | null) => void;
   addMaintenanceRecord: (record: MaintenanceRecord) => void;
   updateMaintenanceRecord: (id: string, updates: Partial<MaintenanceRecord>) => void;
   addMaintenanceTransfer: (transfer: MaintenanceTransfer) => void;
@@ -36,6 +37,12 @@ interface AppContextProps extends AppState {
   updateTask: (id: string, updates: Partial<Task>) => void;
   deleteTask: (id: string) => void;
   updateTelegramSettings: (settings: TelegramSettings) => Promise<void>;
+  addWifiRecord: (record: WifiRecord) => void;
+  updateWifiRecord: (id: string, updates: Partial<WifiRecord>) => void;
+  deleteWifiRecord: (id: string) => void;
+  addCameraAccount: (record: CameraAccountRecord) => void;
+  updateCameraAccount: (id: string, updates: Partial<CameraAccountRecord>) => void;
+  deleteCameraAccount: (id: string) => void;
   images: ImageItem[];
   uploadImage: (base64: string, filename: string, type: string) => Promise<ImageItem | null>;
   deleteImage: (id: string) => Promise<boolean>;
@@ -43,6 +50,10 @@ interface AppContextProps extends AppState {
   updateUser: (id: string, updates: Partial<User>) => void;
   deleteUser: (id: string) => void;
   updatePrintSettings: (settings: PrintSettings) => void;
+  addWallet: (wallet: Wallet) => void;
+  updateWallet: (id: string, updates: Partial<Wallet>) => void;
+  deleteWallet: (id: string) => void;
+  syncData: () => Promise<void>;
 }
 
 const defaultPrintSettings: PrintSettings = {
@@ -64,6 +75,8 @@ const initialState: AppState = {
   currentUser: null,
   users: [],
   products: [],
+  brands: [],
+  categories: [],
   customers: [],
   suppliers: [],
   invoices: [],
@@ -77,9 +90,12 @@ const initialState: AppState = {
   serials: [],
   stockCards: [],
   externalSerials: [],
+  wifiRecords: [],
+  cameraAccounts: [],
   tasks: [],
   telegramSettings: defaultTelegramSettings,
-  printSettings: defaultPrintSettings
+  printSettings: defaultPrintSettings,
+  wallets: []
 };
 
 const AppContext = createContext<AppContextProps | undefined>(undefined);
@@ -103,11 +119,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           returnSalesOrders: Array.isArray(parsed.returnSalesOrders) ? parsed.returnSalesOrders : [],
           invoices: Array.isArray(parsed.invoices) ? parsed.invoices : initialState.invoices,
           products: Array.isArray(parsed.products) ? parsed.products : initialState.products,
+          brands: Array.isArray(parsed.brands) ? parsed.brands : initialState.brands,
+          categories: Array.isArray(parsed.categories) ? parsed.categories : initialState.categories,
           customers: Array.isArray(parsed.customers) ? parsed.customers : initialState.customers,
           suppliers: Array.isArray(parsed.suppliers) ? parsed.suppliers : initialState.suppliers,
           images: Array.isArray(parsed.images) ? parsed.images : [],
           maintenanceRecords: Array.isArray(parsed.maintenanceRecords) ? parsed.maintenanceRecords : [],
+          wifiRecords: Array.isArray(parsed.wifiRecords) ? parsed.wifiRecords : [],
+          cameraAccounts: Array.isArray(parsed.cameraAccounts) ? parsed.cameraAccounts : [],
           tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+          wallets: Array.isArray(parsed.wallets) ? parsed.wallets : [],
           telegramSettings: parsed.telegramSettings || initialState.telegramSettings,
         };
       }
@@ -123,14 +144,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     localStorage.setItem('cuongtin_erp_state', JSON.stringify(state));
   }, [state]);
 
-  // Fetch data from Google Sheets on mount
-  useEffect(() => {
-    const loadDataFromAPI = async () => {
-      try {
-        setIsLoading(true);
-        // Fetch core data in parallel
-        const [
-          apiProducts, 
+  const syncData = async () => {
+    try {
+      setIsLoading(true);
+      // Fetch core data in parallel
+      const [
+        apiProducts, 
           apiCustomers, 
           apiSuppliers, 
           apiSerials, 
@@ -151,7 +170,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           apiMaintenanceTransfers,
           apiImages,
           apiTasks,
-          apiTelegramSettings
+          apiTelegramSettings,
+          apiWifiRecords,
+          apiCameraAccounts,
+          apiWallets,
+          apiBrands,
+          apiCategories
         ] = await Promise.all([
           apiService.readSheet('Products'),
           apiService.readSheet('Customers'),
@@ -174,14 +198,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           apiService.readSheet('MaintenanceTransfers'),
           apiService.readSheet('Image'),
           apiService.readSheet('Tasks'),
-          apiService.readSheet('TelegramSettings')
+          apiService.readSheet('TelegramSettings'),
+          apiService.readSheet('WifiRecords'),
+          apiService.readSheet('CameraAccounts'),
+          apiService.readSheet('Wallets'),
+          apiService.readSheet('Brands'),
+          apiService.readSheet('Categories')
         ]);
 
         const mappedProducts = apiProducts.length > 0 ? apiProducts.map((p: any) => ({
           id: String(p.id || ''),
           name: String(p.name || ''),
-          price: Number(p.salePrice) || 0,
-          importPrice: Number(p.costPrice) || 0,
+          price: parseFormattedNumber(p.salePrice),
+          importPrice: parseFormattedNumber(p.costPrice),
           stock: Number(p.stock) || 0,
           hasSerial: p.hasSerial === true || p.hasSerial === 'TRUE' || p.hasSerial === 'true' || p.hasSerial === 1,
           isService: p.isService === true || p.isService === 'TRUE' || p.isService === 'true' || p.isService === 1,
@@ -189,7 +218,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           category: String(p.category || ''),
           unit: String(p.unit || ''),
           image: String(p.image || p.imageUrl || p.link_anh || p.AnhText || ''),
-          warrantyMonths: p.warrantyMonths || p.warranty || p.BaoHanh || p.warranty_months || p.wa ? Number(p.warrantyMonths || p.warranty || p.BaoHanh || p.warranty_months || p.wa) : undefined
+          warrantyMonths: p.warrantyMonths || p.warranty || p.BaoHanh || p.warranty_months || p.wa ? Number(p.warrantyMonths || p.warranty || p.BaoHanh || p.warranty_months || p.wa) : undefined,
+          expectedOutOfStock: String(p.expectedOutOfStock || ''),
+          lowStockThreshold: Number(p.lowStockThreshold) || 0,
+          status: (p.status === 'Ngừng kinh doanh' || p.status === 'DISCONTINUED') ? 'Ngừng kinh doanh' : 'Đang kinh doanh'
         })) : [];
 
         const extractItems = (record: any, details: any[], parentIdKeys: string[]) => {
@@ -204,15 +236,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               const prodId = String(d.productId || d.productID || d.ProductID || d.productid || '');
               const product = mappedProducts.find((p: any) => p.id === prodId);
               const qty = Number(d.quantity || d.qty || d.Quantity || d.Qty || 0);
+              
+              const rawSn = parseSnFromDb(d.sn || d.SN || d.serial || d.Serial || d.serials || d.Serials);
+              const snArray = rawSn ? (typeof rawSn === 'string' ? rawSn.split(',').map(s => s.trim()).filter(Boolean) : (Array.isArray(rawSn) ? rawSn : [])) : [];
+
               return {
                 id: prodId,
                 name: product?.name || 'Sản phẩm',
-                price: Number(d.price || d.Price || 0),
+                price: parseFormattedNumber(d.price || d.Price || 0),
                 qty: qty,
-                sn: (d.sn || d.SN || d.serial || d.Serial || d.serials || d.Serials) ? String(d.sn || d.SN || d.serial || d.Serial || d.serials || d.Serials) : undefined,
+                sn: snArray,
                 unit: d.unit || d.Unit || undefined,
                 warrantyExpiry: d.warrantyExpiry || d.WarrantyExpiry || undefined,
-                importPriceTotal: Number(d.importPriceTotal || d.ImportPriceTotal || (product?.importPrice || 0) * qty)
+                importPriceTotal: parseFormattedNumber(d.importPriceTotal || d.ImportPriceTotal || (product?.importPrice || 0) * qty)
               };
             });
           }
@@ -230,23 +266,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         };
 
         const mappedInvoices = apiInvoices.length > 0 ? apiInvoices.map((inv: any) => {
-            const total = Number(inv.finalAmount || inv.total || 0);
-            const paid = Number(inv.paidAmount || inv.paid || 0);
-            const debt = inv.debt !== undefined ? Number(inv.debt) : (total - paid);
+            const total = parseFormattedNumber(inv.finalAmount || inv.total || 0);
+            const paid = parseFormattedNumber(inv.paidAmount || inv.paid || 0);
+            const debt = inv.debt !== undefined ? parseFormattedNumber(inv.debt) : (total - paid);
             return {
               id: String(inv.id || ''),
-              date: String(inv.createdAt || inv.date || ''),
+              date: formatDateTime(inv.createdAt || inv.date),
               customer: String(inv.customerID || inv.customer || ''),
-              phone: String(inv.phone || ''),
+              phone: padPhone(inv.phone),
               address: String(inv.address || ''),
               total,
               paid,
               debt,
-              oldDebt: inv.oldDebt !== undefined ? Number(inv.oldDebt) : undefined,
-              totalDebt: inv.totalDebt !== undefined ? Number(inv.totalDebt) : undefined,
-              discount: Number(inv.discount || 0),
+              oldDebt: inv.oldDebt !== undefined ? parseFormattedNumber(inv.oldDebt) : undefined,
+              totalDebt: inv.totalDebt !== undefined ? parseFormattedNumber(inv.totalDebt) : undefined,
+              discount: parseFormattedNumber(inv.discount || 0),
               note: String(inv.note || ''),
               taskId: String(inv.taskId || inv.taskID || inv.TaskID || ''),
+              paymentMethod: (inv.paymentMethod as any) || 'CASH',
+              walletId: String(inv.walletId || ''),
               items: extractItems(inv, apiInvoiceDetails, ['invoiceID', 'invoiceId', 'InvoiceID', 'invoiceid'])
             };
           }) : [];
@@ -254,12 +292,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const mappedReturnSales = apiReturnSales.length > 0 ? apiReturnSales.map((ret: any) => {
             return {
               id: String(ret.id || ''),
-              date: String(ret.createdAt || ret.date || ''),
+              date: formatDateTime(ret.createdAt || ret.date),
               customer: String(ret.customerID || ret.customer || ''),
-              totalGoods: Number(ret.totalGoods || 0),
-              discount: Number(ret.discount || 0),
-              total: Number(ret.totalAmount || ret.totalRefund || ret.total || 0),
-              paid: Number(ret.paidAmount || ret.paid || 0),
+              totalGoods: parseFormattedNumber(ret.totalGoods || 0),
+              discount: parseFormattedNumber(ret.discount || 0),
+              total: parseFormattedNumber(ret.totalAmount || ret.totalRefund || ret.total || 0),
+              paid: parseFormattedNumber(ret.paidAmount || ret.paid || 0),
               status: ret.status || 'DONE',
               note: String(ret.note || ''),
               items: extractItems(ret, apiReturnSalesDetails, ['returnID', 'returnId', 'ReturnID', 'returnid', 'returnSalesId'])
@@ -269,12 +307,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const mappedReturnImports = apiReturnImports.length > 0 ? apiReturnImports.map((ret: any) => {
             return {
               id: String(ret.id || ''),
-              date: String(ret.createdAt || ret.date || ''),
+              date: formatDateTime(ret.createdAt || ret.date),
               supplier: String(ret.supplierId || ret.supplier || ''),
-              totalGoods: Number(ret.totalGoods || 0),
-              discount: Number(ret.discount || 0),
-              total: Number(ret.totalAmount || ret.totalRefund || ret.total || 0),
-              received: Number(ret.receivedAmount || ret.received || 0),
+              totalGoods: parseFormattedNumber(ret.totalGoods || 0),
+              discount: parseFormattedNumber(ret.discount || 0),
+              total: parseFormattedNumber(ret.totalAmount || ret.totalRefund || ret.total || 0),
+              received: parseFormattedNumber(ret.receivedAmount || ret.received || 0),
               status: ret.status || 'DONE',
               note: String(ret.note || ''),
               items: extractItems(ret, apiReturnImportDetails, ['returnID', 'returnId', 'ReturnID', 'returnid', 'returnImportId'])
@@ -284,24 +322,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const soldSerials = new Set<string>();
         mappedInvoices.forEach((inv: any) => {
           inv.items.forEach((item: any) => {
-            if (item.sn && typeof item.sn === 'string') {
-              item.sn.split(',').forEach((s: string) => soldSerials.add(s.trim()));
+            if (item.sn && Array.isArray(item.sn)) {
+              item.sn.forEach((s: string) => soldSerials.add(s.trim()));
             }
           });
         });
 
         mappedReturnImports.forEach((ret: any) => {
           ret.items.forEach((item: any) => {
-            if (item.sn && typeof item.sn === 'string') {
-              item.sn.split(',').forEach((s: string) => soldSerials.add(s.trim()));
+            if (item.sn && Array.isArray(item.sn)) {
+              item.sn.forEach((s: string) => soldSerials.add(s.trim()));
             }
           });
         });
 
         mappedReturnSales.forEach((ret: any) => {
           ret.items.forEach((item: any) => {
-            if (item.sn && typeof item.sn === 'string') {
-              item.sn.split(',').forEach((s: string) => soldSerials.delete(s.trim()));
+            if (item.sn && Array.isArray(item.sn)) {
+              item.sn.forEach((s: string) => soldSerials.delete(s.trim()));
             }
           });
         });
@@ -309,49 +347,61 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setState(prev => ({
           ...prev,
           products: mappedProducts,
+          brands: apiBrands.length > 0 ? apiBrands.map((b: any) => ({
+            id: String(b.id || ''),
+            name: String(b.name || '')
+          })) : [],
+          categories: apiCategories.length > 0 ? apiCategories.map((c: any) => ({
+            id: String(c.id || ''),
+            name: String(c.name || '')
+          })) : [],
           customers: apiCustomers.length > 0 ? apiCustomers.map((c: any) => ({
             id: String(c.id || ''),
             name: String(c.name || ''),
-            phone: String(c.phone || ''),
+            phone: padPhone(c.phone),
+            phone2: padPhone(c.phone2),
             address: String(c.address || ''),
             location: String(c.location || ''),
             note: String(c.note || ''),
             createdBy: String(c.createdBy || ''),
             createdAt: String(c.createdAt || ''),
-            totalSpent: Number(c.totalSpent) || 0,
-            debt: Number(c.debt) || 0
+            totalSpent: parseFormattedNumber(c.totalSpent),
+            debt: parseFormattedNumber(c.debt)
           })) : [],
           suppliers: apiSuppliers.length > 0 ? apiSuppliers.map((s: any) => ({
             id: String(s.id || ''),
             name: String(s.name || ''),
-            phone: String(s.phone || ''),
+            phone: padPhone(s.phone),
             address: String(s.address || ''),
-            totalDebt: Number(s.debt) || 0
+            totalDebt: parseFormattedNumber(s.debt)
           })) : [],
           serials: apiSerials.length > 0 ? apiSerials.map((s: any) => {
-            const sn = String(s.sn || '').trim();
+            const sn = parseSnFromDb(s.sn)?.trim() || '';
             return {
               prodId: String(s.prodId || ''),
               sn,
               supplier: String(s.supplier || ''),
-              importPrice: Number(s.importPrice) || 0,
-              date: String(s.date || ''),
+              importPrice: parseFormattedNumber(s.importPrice),
+              date: formatDateTime(s.createdAt || s.date),
               refId: String(s.refId || ''),
               status: soldSerials.has(sn) ? 'SOLD' : 'AVAILABLE'
             };
           }) : [],
-          stockCards: apiStockCards.length > 0 ? apiStockCards.map((c: any) => ({
-            ...c,
-            sn: c.sn ? (typeof c.sn === 'string' ? c.sn.split(',') : c.sn) : []
-          })) : [],
+          stockCards: apiStockCards.length > 0 ? apiStockCards.map((c: any) => {
+            const snVal = parseSnFromDb(c.sn);
+            return {
+              ...c,
+              sn: snVal ? (typeof snVal === 'string' ? snVal.split(',') : snVal) : []
+            };
+          }) : [],
           invoices: mappedInvoices,
           importOrders: apiImports.length > 0 ? apiImports.map((imp: any) => {
-            const total = Number(imp.totalAmount || imp.total || 0);
-            const paid = Number(imp.paidAmount || imp.paid || 0);
+            const total = parseFormattedNumber(imp.totalAmount || imp.total || 0);
+            const paid = parseFormattedNumber(imp.paidAmount || imp.paid || 0);
             // Calculate debt based on total and paid, ignore the debt field from API if it's 0 but total > paid
             let debt = total - paid;
             if (imp.debt !== undefined && imp.debt !== '' && imp.debt !== null) {
-                const apiDebt = Number(imp.debt);
+                const apiDebt = parseFormattedNumber(imp.debt);
                 // Only use API debt if it makes sense (e.g., if total is 0, or if apiDebt is not 0 when total > paid)
                 if (apiDebt !== 0 || total === paid) {
                     debt = apiDebt;
@@ -360,51 +410,44 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             
             return {
               id: String(imp.id || ''),
-              date: String(imp.createdAt || imp.date || ''),
+              date: formatDateTime(imp.createdAt || imp.date),
               supplier: String(imp.supplierId || imp.supplier || ''),
               status: imp.status || 'DONE',
               total,
               paid,
               debt,
-              discount: Number(imp.discount || 0),
-              returnCost: Number(imp.returnCost || 0),
-              shippingFee: Number(imp.shippingFee || 0),
-              otherCost: Number(imp.otherCost || 0),
+              discount: parseFormattedNumber(imp.discount || 0),
+              returnCost: parseFormattedNumber(imp.returnCost || 0),
+              shippingFee: parseFormattedNumber(imp.shippingFee || 0),
+              otherCost: parseFormattedNumber(imp.otherCost || 0),
               note: String(imp.note || ''),
-              items: extractItems(imp, apiImportDetails, ['importID', 'importId', 'ImportID', 'importid']).map((item: any) => ({
-                ...item,
-                sn: typeof item.sn === 'string' ? item.sn.split(',').map((s: string) => s.trim()).filter(Boolean) : (Array.isArray(item.sn) ? item.sn : [])
-              }))
+              walletId: String(imp.walletId || ''),
+              items: extractItems(imp, apiImportDetails, ['importID', 'importId', 'ImportID', 'importid'])
             };
           }) : [],
-          returnImportOrders: mappedReturnImports.map((ret: any) => ({
-            ...ret,
-            items: ret.items.map((item: any) => ({
-              ...item,
-              sn: typeof item.sn === 'string' ? item.sn.split(',').map((s: string) => s.trim()).filter(Boolean) : (Array.isArray(item.sn) ? item.sn : [])
-            }))
-          })),
+          returnImportOrders: mappedReturnImports,
           returnSalesOrders: mappedReturnSales,
           cashTransactions: apiCash.length > 0 ? apiCash.map((c: any) => ({
             id: String(c.id || ''),
-            date: String(c.createdAt || c.date || ''),
+            date: formatDateTime(c.createdAt || c.date),
             type: c.type as 'RECEIPT' | 'PAYMENT',
-            amount: Number(c.amount || 0),
+            amount: parseFormattedNumber(c.amount || 0),
             category: c.category as any,
             partner: String(c.partner || ''),
             note: String(c.note || ''),
-            refId: String(c.referenceId || c.refId || '')
+            refId: String(c.referenceId || c.refId || ''),
+            walletId: c.walletId ? String(c.walletId) : undefined
           })) : [],
           maintenanceRecords: apiMaintenance.length > 0 ? apiMaintenance.map((m: any) => ({
             id: String(m.id || ''),
-            date: String(m.createdAt || m.date || ''),
+            date: formatDateTime(m.createdAt || m.date),
             customerName: String(m.customerName || ''),
-            customerPhone: String(m.customerPhone || ''),
+            customerPhone: padPhone(m.customerPhone),
             productName: String(m.productName || ''),
             serialNumber: String(m.serialNumber || ''),
             issue: String(m.issue || ''),
             status: m.status || 'RECEIVING',
-            cost: Number(m.cost || 0),
+            cost: parseFormattedNumber(m.cost || 0),
             note: String(m.note || ''),
             returnDate: String(m.returnDate || ''),
             transferId: m.transferId ? String(m.transferId) : undefined,
@@ -419,8 +462,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             supplierName: String(t.supplierName || ''),
             accessories: String(t.accessories || ''),
             status: t.status || 'Đóng hàng',
-            repairCost: Number(t.repairCost || 0),
-            shippingCost: Number(t.shippingCost || t.shippingcost || 0),
+            repairCost: parseFormattedNumber(t.repairCost || 0),
+            shippingCost: parseFormattedNumber(t.shippingCost || t.shippingcost || 0),
             transferDate: String(t.transferDate || ''),
             returnDate: String(t.returnDate || ''),
             note: String(t.note || '')
@@ -430,7 +473,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             date: String(e.date || ''),
             customer: String(e.customer || ''),
             product: String(e.product || ''),
-            sn: String(e.sn || ''),
+            sn: parseSnFromDb(e.sn) || '',
             source: String(e.source || ''),
             createdBy: String(e.createdBy || ''),
             note: String(e.note || '')
@@ -463,6 +506,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             purchaseId: String(t.purchaseId || ''),
             repairId: String(t.repairId || '')
           })) : [],
+          wifiRecords: apiWifiRecords && apiWifiRecords.length > 0 ? apiWifiRecords.map((w: any) => ({
+            id: String(w.id || ''),
+            customerName: String(w.customerName || ''),
+            customerPhone: String(w.customerPhone || ''),
+            customerAddress: String(w.customerAddress || ''),
+            wifiName: String(w.wifiName || ''),
+            wifiPassword: String(w.wifiPassword || ''),
+            createdAt: String(w.createdAt || ''),
+            createdBy: String(w.createdBy || ''),
+            note: String(w.note || '')
+          })) : [],
+          cameraAccounts: apiCameraAccounts && apiCameraAccounts.length > 0 ? apiCameraAccounts.map((c: any) => ({
+            id: String(c.id || ''),
+            customerName: String(c.customerName || ''),
+            customerPhone: String(c.customerPhone || ''),
+            customerAddress: String(c.customerAddress || ''),
+            accountName: String(c.accountName || ''),
+            accountPassword: String(c.accountPassword || ''),
+            cameraBrand: String(c.cameraBrand || ''),
+            createdAt: String(c.createdAt || ''),
+            createdBy: String(c.createdBy || ''),
+            note: String(c.note || '')
+          })) : [],
           telegramSettings: apiTelegramSettings && apiTelegramSettings.length > 0 ? {
             botToken: String(apiTelegramSettings[0].botToken || ''),
             chatId: String(apiTelegramSettings[0].chatId || ''),
@@ -475,7 +541,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             url: String(img.url || img['URL'] || ''),
             fileType: String(img.fileType || img['Định dạng'] || img.format || ''),
             category: String(img.category || img['Loại'] || img.type || 'KHÁC')
-          }))
+          })),
+          wallets: (() => {
+            const tempWallets = apiWallets && apiWallets.length > 0 ? apiWallets.map((w: any) => ({
+              id: String(w.id || ''),
+              name: String(w.name || ''),
+              type: (w.type === 'CASH' || w.type === 'BANK' || w.type === 'EWALLET') ? w.type : 'CASH',
+              balance: parseFormattedNumber(w.balance || 0),
+              accountNumber: w.accountNumber ? String(w.accountNumber) : undefined,
+              bankName: w.bankName ? String(w.bankName) : undefined,
+              ownerName: w.ownerName ? String(w.ownerName) : undefined,
+              isActive: w.isActive === true || w.isActive === 'TRUE' || w.isActive === 'true' || String(w.isActive).toLowerCase() === 'true',
+              icon: String(w.icon || ''),
+              color: String(w.color || ''),
+              backgroundImage: String(w.backgroundImage || w.background || '')
+            })) : [];
+            const uniqueMap = new Map();
+            tempWallets.forEach((w: any) => {
+              if (!uniqueMap.has(w.id)) {
+                uniqueMap.set(w.id, w);
+              }
+            });
+            return Array.from(uniqueMap.values());
+          })()
         }));
       } catch (error) {
         console.error("Failed to load data from Google Sheets:", error);
@@ -484,7 +572,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     };
 
-    loadDataFromAPI();
+  // Fetch data from Google Sheets on mount
+  useEffect(() => {
+    syncData();
   }, []);
 
   // Polling for new invoices to support notifications
@@ -510,16 +600,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               // Map new invoices and add to state
               const mappedNew = newInvoicesFromApi.map((inv: any) => ({
                 id: String(inv.id || ''),
-                date: String(inv.createdAt || inv.date || ''),
+                date: formatDateTime(inv.createdAt || inv.date),
                 customer: String(inv.customerID || inv.customer || ''),
-                phone: String(inv.phone || ''),
+                phone: padPhone(inv.phone),
                 address: String(inv.address || ''),
-                total: Number(inv.finalAmount || inv.total || 0),
-                paid: Number(inv.paidAmount || inv.paid || 0),
-                debt: Number(inv.debt || 0),
-                discount: Number(inv.discount || 0),
+                total: parseFormattedNumber(inv.finalAmount || inv.total || 0),
+                paid: parseFormattedNumber(inv.paidAmount || inv.paid || 0),
+                debt: parseFormattedNumber(inv.debt || 0),
+                discount: parseFormattedNumber(inv.discount || 0),
                 note: String(inv.note || ''),
                 taskId: String(inv.taskId || ''),
+                paymentMethod: (inv.paymentMethod as any) || 'CASH',
+                walletId: String(inv.walletId || ''),
                 items: [] // Polling only fetches header, details would need another call
               }));
 
@@ -566,7 +658,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       brand: product.brand || '',
       warranty: product.warrantyMonths || 0,
       expectedOutOfStock: product.expectedOutOfStock || '',
-      image: product.image || ''
+      image: product.image || '',
+      lowStockThreshold: product.lowStockThreshold || 0,
+      status: product.status || 'Đang kinh doanh'
     }).then(result => {
       if (!result.success) {
         console.error("[AppContext] Background save failed for product:", product.id);
@@ -592,7 +686,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         type: diff > 0 ? 'NHAP' : 'XUAT',
         qty: Math.abs(diff),
         partner: 'Điều chỉnh kho',
-        date: new Date().toLocaleString('vi-VN'),
+        date: formatDateTime(new Date()),
         price: product.importPrice || 0,
         refId: 'ADJ' + Date.now().toString().slice(-6),
         sn: []
@@ -620,6 +714,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (updates.brand !== undefined) apiUpdates.brand = updates.brand;
     if (updates.warrantyMonths !== undefined) apiUpdates.warranty = updates.warrantyMonths;
     if (updates.expectedOutOfStock !== undefined) apiUpdates.expectedOutOfStock = updates.expectedOutOfStock;
+    if (updates.lowStockThreshold !== undefined) apiUpdates.lowStockThreshold = updates.lowStockThreshold;
+    if (updates.status !== undefined) apiUpdates.status = updates.status;
     if (updates.image !== undefined) apiUpdates.image = updates.image;
 
     apiService.updateRecord('Products', id, apiUpdates).then(result => {
@@ -689,17 +785,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const addCustomer = async (customer: Customer) => {
+    const paddedPhone = padPhone(customer.phone);
+    const paddedPhone2 = padPhone(customer.phone2);
     const newCustomer = { 
       ...customer, 
+      phone: paddedPhone,
+      phone2: paddedPhone2,
       id: customer.id || generateId('KH', state.customers || []),
-      createdAt: customer.createdAt || new Date().toLocaleString('vi-VN'),
+      createdAt: customer.createdAt || formatDateTime(new Date()),
       createdBy: customer.createdBy || state.currentUser?.name || 'Admin'
     };
     setState(prev => ({ ...prev, customers: [...(prev.customers || []), newCustomer] }));
     await apiService.createRecord('Customers', {
       id: newCustomer.id,
       name: newCustomer.name,
-      phone: newCustomer.phone?.startsWith('0') ? `'${newCustomer.phone}` : newCustomer.phone,
+      phone: paddedPhone ? `'${paddedPhone}` : '',
+      phone2: paddedPhone2 ? `'${paddedPhone2}` : '',
       address: newCustomer.address || '',
       location: newCustomer.location || '',
       note: newCustomer.note || '',
@@ -711,25 +812,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const updateCustomer = async (id: string, updates: Partial<Customer>) => {
+    const apiUpdates: any = { ...updates };
+    if (updates.phone !== undefined) {
+      const paddedPhone = padPhone(updates.phone);
+      apiUpdates.phone = paddedPhone ? `'${paddedPhone}` : '';
+      updates.phone = paddedPhone;
+    }
+    if (updates.phone2 !== undefined) {
+      const paddedPhone2 = padPhone(updates.phone2);
+      apiUpdates.phone2 = paddedPhone2 ? `'${paddedPhone2}` : '';
+      updates.phone2 = paddedPhone2;
+    }
+    
     setState(prev => ({
       ...prev,
       customers: (prev.customers || []).map(c => c.id === id ? { ...c, ...updates } : c)
     }));
-    
-    const apiUpdates = { ...updates };
-    if (apiUpdates.phone?.startsWith('0')) {
-      apiUpdates.phone = `'${apiUpdates.phone}`;
-    }
     await apiService.updateRecord('Customers', id, apiUpdates);
   };
 
   const addSupplier = async (supplier: Supplier) => {
-    const newSupplier = { ...supplier, id: supplier.id || generateId('NCC', state.suppliers || []) };
+    const paddedPhone = padPhone(supplier.phone);
+    const newSupplier = { ...supplier, phone: paddedPhone, id: supplier.id || generateId('NCC', state.suppliers || []) };
     setState(prev => ({ ...prev, suppliers: [...(prev.suppliers || []), newSupplier] }));
     await apiService.createRecord('Suppliers', {
       id: newSupplier.id,
       name: newSupplier.name,
-      phone: newSupplier.phone?.startsWith('0') ? `'${newSupplier.phone}` : newSupplier.phone,
+      phone: paddedPhone ? `'${paddedPhone}` : paddedPhone,
       address: newSupplier.address || '',
       totalBuy: 0,
       debt: 0,
@@ -763,7 +872,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       });
       
-      const newStockCards: StockCard[] = newInvoice.items.map(item => ({
+      const oldSns = new Set<string>();
+      if (isUpdate && existingInvoice) {
+        existingInvoice.items.forEach(item => {
+          if (item.sn && typeof item.sn === 'string') {
+            item.sn.split(',').forEach(s => oldSns.add(s.trim()));
+          }
+        });
+      }
+      
+      const newStockCards: StockCard[] = newInvoice.items.map((item, i) => ({
+        id: `SC_${newInvoice.id}_${i}`,
         prodId: item.id,
         type: 'XUAT',
         qty: item.qty,
@@ -774,12 +893,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         sn: item.sn ? item.sn.split(',').map(s => s.trim()) : []
       }));
 
+      // Find original cash/wallet transaction to modify if needed
+      let updatedCashTransactions = prev.cashTransactions || [];
+      const txToUpdate = isUpdate ? updatedCashTransactions.find(t => t.refId === newInvoice.id && t.category === 'SALES_REVENUE') : null;
+      if (txToUpdate) {
+        updatedCashTransactions = updatedCashTransactions.map(t => 
+          t.id === txToUpdate.id ? { ...t, amount: newInvoice.paid } : t
+        );
+      }
+
       // Update products stock in state
       const updatedProducts = (prev.products || []).map(p => {
         let newStock = p.stock || 0;
         
         // 1. Revert old stock if update
-        if (isUpdate && !p.isService) {
+        if (isUpdate && !p.isService && existingInvoice) {
           const oldItem = existingInvoice.items.find(i => i.id === p.id);
           if (oldItem) newStock += oldItem.qty;
         }
@@ -801,9 +929,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return { 
         ...prev, 
         invoices: [...otherInvoices, newInvoice],
-        serials: (prev.serials || []).map(s => soldSns.has(s.sn) ? { ...s, status: 'SOLD' } : s),
+        serials: (prev.serials || []).map(s => {
+          if (soldSns.has(s.sn)) return { ...s, status: 'SOLD' };
+          if (isUpdate && oldSns.has(s.sn)) return { ...s, status: 'AVAILABLE' };
+          return s;
+        }),
         stockCards: [...prev.stockCards.filter(sc => sc.refId !== newInvoice.id), ...newStockCards],
-        products: updatedProducts
+        products: updatedProducts,
+        cashTransactions: updatedCashTransactions
       };
     });
     
@@ -826,7 +959,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           oldDebt: newInvoice.oldDebt,
           totalDebt: newInvoice.totalDebt,
           taskId: newInvoice.taskId || '',
-          paymentMethod: 'CASH',
+          paymentMethod: newInvoice.paymentMethod || 'CASH',
+          walletId: newInvoice.walletId || '',
+          walletName: newInvoice.walletId ? state.wallets.find(w => w.id === newInvoice.walletId)?.name || '' : '',
           status: newInvoice.debt > 0 ? 'Còn nợ' : 'Hoàn tất',
           note: newInvoice.note || '',
           items: JSON.stringify(newInvoice.items)
@@ -834,6 +969,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
         if (isUpdate) {
           await apiService.updateRecord('Invoices', newInvoice.id, syncData);
+          
+          // Also update CashLedger/Wallet if they exist
+          const cashTx = state.cashTransactions.find(t => t.refId === newInvoice.id && t.category === 'SALES_REVENUE');
+          if (cashTx) {
+            await apiService.updateRecord('CashLedger', cashTx.id, { amount: newInvoice.paid });
+          }
         } else {
           await apiService.createRecord('Invoices', syncData);
         }
@@ -847,6 +988,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           const newItem = newInvoice.items[i];
           const oldItem = isUpdate ? existingInvoice.items[i] : null;
           const detailId = `${newInvoice.id}_${i}`;
+          const scId = `SC_${newInvoice.id}_${i}`;
 
           if (newItem) {
             // Upsert detail
@@ -858,46 +1000,51 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               quantity: newItem.qty,
               price: newItem.price,
               subTotal: newItem.qty * newItem.price,
-              sn: newItem.sn || '',
+              sn: formatSnForDb(newItem.sn),
               warrantyExpiry: newItem.warrantyExpiry || ''
             };
             
-            // Re-using createRecord here is risky if it appends, so we use updateRecord if isUpdate is true or if we detect it should be there.
-            // Since we use a deterministic ID, updateRecord is safer for "Edit" mode.
+            // Stock card data
+            const stockCardData = {
+              id: scId,
+              prodId: newItem.id,
+              productName: newItem.name,
+              type: 'XUAT',
+              qty: newItem.qty,
+              partner: newInvoice.customer,
+              date: newInvoice.date,
+              price: newItem.price,
+              refId: newInvoice.id,
+              sn: formatSnForDb(newItem.sn)
+            };
+            
             if (isUpdate && i < existingInvoice.items.length) {
               detailPromises.push(apiService.updateRecord('InvoiceDetails', detailId, detailData));
+              detailPromises.push(apiService.updateRecord('StockCards', scId, stockCardData));
             } else {
               detailPromises.push(apiService.createRecord('InvoiceDetails', detailData));
+              detailPromises.push(apiService.createRecord('StockCards', stockCardData));
             }
 
             // Sync product stock to DB
             const p = state.products.find(prod => prod.id === newItem.id);
             if (p && !p.isService) {
-              const currentStock = p.stock || 0;
-              // Stock is already updated in state optimistically, so the state.products might have the final value already? 
-              // Wait, state.products inside this async block might be stale.
-              // Best to recalculate or get the latest from state.
-              detailPromises.push(apiService.updateRecord('Products', newItem.id, { stock: p.stock }));
+              const adjustedStock = p.stock + (isUpdate && existingInvoice ? (existingInvoice.items.find(old => old.id === p.id)?.qty || 0) : 0) - newItem.qty;
+              detailPromises.push(apiService.updateRecord('Products', newItem.id, { stock: adjustedStock }));
             }
           } else if (isUpdate && oldItem) {
             // Item removed in edit: Delete detail row
             detailPromises.push(apiService.deleteRecord('InvoiceDetails', detailId));
+            detailPromises.push(apiService.deleteRecord('StockCards', scId));
             
             // Revert stock in DB for removed item
             const p = state.products.find(prod => prod.id === oldItem.id);
             if (p && !p.isService) {
-              detailPromises.push(apiService.updateRecord('Products', p.id, { stock: p.stock }));
+              detailPromises.push(apiService.updateRecord('Products', p.id, { stock: p.stock + oldItem.qty }));
             }
           }
         }
         
-        // Stock Card update
-        // (Assuming we just want to replace them if they existed)
-        // For simplicity, we create new ones but usually StockCards are immutable logs.
-        // However, user wants "no new rows".
-        // Stock cards are log entries, so maybe we keep them as is or delete-recreate?
-        // Let's just do details for now as that was the screenshot.
-
         await Promise.all(detailPromises);
       } catch (error) {
         console.error("Failed to sync invoice to cloud:", error);
@@ -945,6 +1092,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (updates.discount !== undefined) apiUpdates.discount = updates.discount;
     if (updates.note !== undefined) apiUpdates.note = updates.note;
     if (updates.taskId !== undefined) apiUpdates.taskId = updates.taskId;
+    if (updates.paymentMethod !== undefined) apiUpdates.paymentMethod = updates.paymentMethod;
+    if (updates.walletId !== undefined) {
+      apiUpdates.walletId = updates.walletId;
+      const walletObj = state.wallets.find(w => w.id === updates.walletId);
+      apiUpdates.walletName = walletObj ? walletObj.name : '';
+    }
 
     if (calculatedDebt !== undefined) {
       apiUpdates.debt = calculatedDebt;
@@ -1010,12 +1163,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const addImportOrder = async (order: ImportOrder) => {
+    const existingOrder = state.importOrders?.find(o => o.id === order.id);
+    const isUpdate = !!existingOrder;
+
     const newOrder = {
       ...order,
       id: order.id || generateId('NH', state.importOrders || [])
     };
 
-    const newStockCards: StockCard[] = newOrder.items.map(item => ({
+    const newStockCards: StockCard[] = newOrder.items.map((item, i) => ({
+      id: `SC_${newOrder.id}_${i}`,
       prodId: item.id,
       type: 'NHAP',
       qty: item.qty,
@@ -1026,15 +1183,51 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       sn: item.sn || []
     }));
 
-    setState(prev => ({ 
-      ...prev, 
-      importOrders: [...(prev.importOrders || []), newOrder],
-      stockCards: [...(prev.stockCards || []), ...newStockCards]
-    }));
+    setState(prev => {
+      const otherOrders = isUpdate 
+        ? (prev.importOrders || []).filter(o => o.id !== newOrder.id)
+        : (prev.importOrders || []);
+
+      let updatedCashTransactions = prev.cashTransactions || [];
+      const txToUpdate = isUpdate ? updatedCashTransactions.find(t => t.refId === newOrder.id && t.category === 'IMPORT_PAYMENT') : null;
+      if (txToUpdate) {
+        updatedCashTransactions = updatedCashTransactions.map(t => 
+          t.id === txToUpdate.id ? { ...t, amount: newOrder.paid, walletId: newOrder.walletId } : t
+        );
+      }
+        
+      const updatedProducts = (prev.products || []).map(p => {
+        let newStock = p.stock || 0;
+        
+        // Reverse old stock if update
+        if (isUpdate && existingOrder && !p.isService) {
+          const oldItem = existingOrder.items.find(i => i.id === p.id);
+          if (oldItem) newStock -= oldItem.qty; // Reverse the previous import meaning we subtract the previously added amount
+        }
+        
+        // Apply new stock
+        const newItem = newOrder.items.find(i => i.id === p.id);
+        if (newItem && !p.isService) {
+          newStock += newItem.qty;
+        }
+        
+        return { ...p, stock: newStock, importPrice: newItem ? newItem.price : p.importPrice };
+      });
+        
+      return { 
+        ...prev, 
+        importOrders: [...otherOrders, newOrder],
+        stockCards: [...(prev.stockCards || []).filter(sc => sc.refId !== newOrder.id), ...newStockCards],
+        products: updatedProducts,
+        cashTransactions: updatedCashTransactions
+      };
+    });
     
     (async () => {
       try {
-        await apiService.createRecord('Imports', {
+        const walletObj = state.wallets.find(w => w.id === newOrder.walletId);
+        
+        const syncData = {
           id: newOrder.id,
           createdAt: newOrder.date,
           supplierId: newOrder.supplier,
@@ -1049,35 +1242,84 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           debt: newOrder.debt,
           status: newOrder.status,
           note: newOrder.note || '',
+          walletId: newOrder.walletId || '',
+          walletName: walletObj ? walletObj.name : '',
           items: JSON.stringify(newOrder.items)
-        });
+        };
 
-        for (let i = 0; i < newOrder.items.length; i++) {
-          const item = newOrder.items[i];
-          await apiService.createRecord('ImportDetails', {
-            id: `${newOrder.id}_${i}`,
-            importID: newOrder.id,
-            productId: item.id,
-            productName: item.name,
-            quantity: item.qty,
-            price: item.price,
-            subTotal: item.qty * item.price,
-            sn: item.sn ? item.sn.join(',') : ''
-          });
-
-          await apiService.createRecord('StockCards', {
-            id: `SC${Date.now()}${i}`,
-            prodId: item.id,
-            productName: item.name,
-            type: 'NHAP',
-            qty: item.qty,
-            partner: newOrder.supplier,
-            date: newOrder.date,
-            price: item.price,
-            refId: newOrder.id,
-            sn: item.sn ? item.sn.join(',') : ''
-          });
+        if (isUpdate) {
+          await apiService.updateRecord('Imports', newOrder.id, syncData);
+          
+          const cashTx = state.cashTransactions.find(t => t.refId === newOrder.id && t.category === 'IMPORT_PAYMENT');
+          if (cashTx) {
+            await apiService.updateRecord('CashLedger', cashTx.id, { amount: newOrder.paid, walletId: newOrder.walletId || '' });
+          }
+        } else {
+          await apiService.createRecord('Imports', syncData);
         }
+
+        const maxItems = Math.max(newOrder.items.length, isUpdate && existingOrder ? existingOrder.items.length : 0);
+
+        const detailPromises = [];
+        for (let i = 0; i < maxItems; i++) {
+          const newItem = newOrder.items[i];
+          const oldItem = isUpdate && existingOrder ? existingOrder.items[i] : null;
+          const detailId = `${newOrder.id}_${i}`;
+          const scId = `SC_${newOrder.id}_${i}`;
+
+          if (newItem) {
+            const detailData = {
+              id: detailId,
+              importID: newOrder.id,
+              productId: newItem.id,
+              productName: newItem.name,
+              quantity: newItem.qty,
+              price: newItem.price,
+              subTotal: newItem.qty * newItem.price,
+              sn: formatSnForDb(newItem.sn)
+            };
+            
+            const stockCardData = {
+              id: scId,
+              prodId: newItem.id,
+              productName: newItem.name,
+              type: 'NHAP',
+              qty: newItem.qty,
+              partner: newOrder.supplier,
+              date: newOrder.date,
+              price: newItem.price,
+              refId: newOrder.id,
+              sn: formatSnForDb(newItem.sn)
+            };
+
+            if (isUpdate && i < (existingOrder?.items.length || 0)) {
+              detailPromises.push(apiService.updateRecord('ImportDetails', detailId, detailData));
+              detailPromises.push(apiService.updateRecord('StockCards', scId, stockCardData));
+            } else {
+              detailPromises.push(apiService.createRecord('ImportDetails', detailData));
+              detailPromises.push(apiService.createRecord('StockCards', stockCardData));
+            }
+
+            const p = state.products.find(prod => prod.id === newItem.id);
+            if (p && !p.isService) {
+              detailPromises.push(apiService.updateRecord('Products', newItem.id, { 
+                stock: p.stock - (existingOrder?.items.find(old => old.id === p.id)?.qty || 0) + newItem.qty, // Estimate new stock or we can ignore perfect async match and use the computed state later, but let's carefully compute it
+                costPrice: newItem.price
+              }));
+            }
+          } else if (isUpdate && oldItem) {
+            detailPromises.push(apiService.deleteRecord('ImportDetails', detailId));
+            detailPromises.push(apiService.deleteRecord('StockCards', scId));
+            
+            const p = state.products.find(prod => prod.id === oldItem.id);
+            if (p && !p.isService) {
+              detailPromises.push(apiService.updateRecord('Products', p.id, { 
+                stock: p.stock - oldItem.qty 
+              }));
+            }
+          }
+        }
+        await Promise.all(detailPromises);
       } catch (error) {
         console.error("Failed to sync import to cloud:", error);
       }
@@ -1127,6 +1369,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       apiUpdates.status = updates.debt > 0 ? 'Còn nợ' : 'Hoàn tất';
     } else if (updates.status !== undefined) {
       apiUpdates.status = updates.status;
+    }
+    
+    if (updates.walletId !== undefined) {
+      apiUpdates.walletId = updates.walletId;
+      const walletObj = state.wallets.find(w => w.id === updates.walletId);
+      apiUpdates.walletName = walletObj ? walletObj.name : '';
     }
     
     await apiService.updateRecord('Imports', id, apiUpdates);
@@ -1191,7 +1439,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             quantity: item.qty,
             price: item.price,
             subTotal: item.qty * item.price,
-            sn: item.sn ? item.sn.join(',') : ''
+            sn: formatSnForDb(item.sn)
           });
 
           await apiService.createRecord('StockCards', {
@@ -1203,7 +1451,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             date: order.date,
             price: item.price,
             refId: order.id,
-            sn: item.sn ? item.sn.join(',') : ''
+            sn: formatSnForDb(item.sn)
           });
         }
       } catch (error) {
@@ -1268,7 +1516,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             quantity: item.qty,
             price: item.price,
             subTotal: item.qty * item.price,
-            sn: item.sn || ''
+            sn: formatSnForDb(item.sn)
           });
 
           await apiService.createRecord('StockCards', {
@@ -1280,7 +1528,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             date: order.date,
             price: item.price,
             refId: order.id,
-            sn: item.sn || ''
+            sn: formatSnForDb(item.sn)
           });
         }
       } catch (error) {
@@ -1296,13 +1544,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setState(prev => ({ ...prev, stockCards: [...(prev.stockCards || []), cardWithId] }));
     await apiService.createRecord('StockCards', {
       ...cardWithId,
-      sn: card.sn ? card.sn.join(',') : ''
+      sn: formatSnForDb(card.sn)
     });
   };
 
   const addSerial = async (serial: Serial) => {
     setState(prev => ({ ...prev, serials: [...(prev.serials || []), serial] }));
-    await apiService.createRecord('Serials', { ...serial, id: serial.sn });
+    const formattedSn = formatSnForDb(serial.sn);
+    await apiService.createRecord('Serials', { ...serial, sn: formattedSn, id: formattedSn });
   };
 
   const removeSerial = async (sn: string) => {
@@ -1322,8 +1571,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       amount: transaction.amount,
       referenceId: transaction.refId || '',
       partner: transaction.partner || '',
-      note: transaction.note || ''
+      note: transaction.note || '',
+      walletId: transaction.walletId || ''
     });
+
+    if (transaction.walletId) {
+      setState(prev => {
+        const updatedWallets = (prev.wallets || []).map(w => {
+          if (w.id === transaction.walletId) {
+            const newBalance = transaction.type === 'RECEIPT' ? w.balance + transaction.amount : w.balance - transaction.amount;
+            return { ...w, balance: newBalance };
+          }
+          return w;
+        });
+        return { ...prev, wallets: updatedWallets };
+      });
+
+      const wallet = state.wallets.find(w => w.id === transaction.walletId);
+      if (wallet) {
+        const newBalance = transaction.type === 'RECEIPT' ? wallet.balance + transaction.amount : wallet.balance - transaction.amount;
+        await apiService.updateRecord('Wallets', wallet.id, { balance: newBalance });
+      }
+    }
 
     if (transaction.category === 'DEBT_COLLECTION' && transaction.partner) {
       updateCustomerStats(transaction.partner);
@@ -1334,8 +1603,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setState(prev => ({ ...prev, posDraft: draft }));
   }, []);
 
-  const setImportDraft = React.useCallback((draft: ImportDraft) => {
-    setState(prev => ({ ...prev, importDraft: draft }));
+  const setImportDraft = React.useCallback((draft: ImportDraft | undefined | null) => {
+    setState(prev => ({ ...prev, importDraft: draft || undefined }));
   }, []);
 
   const addMaintenanceRecord = async (record: MaintenanceRecord) => {
@@ -1403,11 +1672,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const addExternalSerial = async (serial: ExternalSerial) => {
     setState(prev => ({ ...prev, externalSerials: [...(prev.externalSerials || []), serial] }));
+    const formattedSn = formatSnForDb(serial.sn);
     await apiService.createRecord('ExternalSerials', {
       id: serial.id,
       date: serial.date,
       product: serial.product,
-      sn: serial.sn,
+      sn: formattedSn,
       customer: serial.customer || '',
       source: serial.source || '',
       createdBy: serial.createdBy || '',
@@ -1420,7 +1690,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       ...prev,
       externalSerials: (prev.externalSerials || []).map(s => s.id === id ? { ...s, ...updates } : s)
     }));
-    await apiService.updateRecord('ExternalSerials', id, updates);
+    await apiService.updateRecord('ExternalSerials', id, {
+      ...updates,
+      sn: updates.sn !== undefined ? formatSnForDb(updates.sn) : undefined
+    });
   };
 
   const deleteExternalSerial = async (id: string) => {
@@ -1515,6 +1788,42 @@ ${updates.purchaseId ? `<b>Đơn hàng liên kết:</b> ${updates.purchaseId}\n`
     }
   };
 
+  const addWifiRecord = async (record: WifiRecord) => {
+    setState(prev => ({ ...prev, wifiRecords: [...(prev.wifiRecords || []), record] }));
+    await apiService.createRecord('WifiRecords', record);
+  };
+
+  const updateWifiRecord = async (id: string, updates: Partial<WifiRecord>) => {
+    setState(prev => ({
+      ...prev,
+      wifiRecords: (prev.wifiRecords || []).map(r => r.id === id ? { ...r, ...updates } : r)
+    }));
+    await apiService.updateRecord('WifiRecords', id, updates);
+  };
+
+  const deleteWifiRecord = async (id: string) => {
+    setState(prev => ({ ...prev, wifiRecords: (prev.wifiRecords || []).filter(r => r.id !== id) }));
+    await apiService.deleteRecord('WifiRecords', id);
+  };
+
+  const addCameraAccount = async (record: CameraAccountRecord) => {
+    setState(prev => ({ ...prev, cameraAccounts: [...(prev.cameraAccounts || []), record] }));
+    await apiService.createRecord('CameraAccounts', record);
+  };
+
+  const updateCameraAccount = async (id: string, updates: Partial<CameraAccountRecord>) => {
+    setState(prev => ({
+      ...prev,
+      cameraAccounts: (prev.cameraAccounts || []).map(a => a.id === id ? { ...a, ...updates } : a)
+    }));
+    await apiService.updateRecord('CameraAccounts', id, updates);
+  };
+
+  const deleteCameraAccount = async (id: string) => {
+    setState(prev => ({ ...prev, cameraAccounts: (prev.cameraAccounts || []).filter(a => a.id !== id) }));
+    await apiService.deleteRecord('CameraAccounts', id);
+  };
+
   const deleteTask = async (id: string) => {
     setState(prev => ({ ...prev, tasks: (prev.tasks || []).filter(t => t.id !== id) }));
     await apiService.deleteRecord('Tasks', id);
@@ -1595,7 +1904,7 @@ ${updates.purchaseId ? `<b>Đơn hàng liên kết:</b> ${updates.purchaseId}\n`
       // We'll need the full metadata which might require another read or constructing it
       if (result.status === 'success' || result.success) {
         const newItem: ImageItem = {
-          timestamp: new Date().toLocaleString('vi-VN'),
+          timestamp: formatDateTime(new Date()),
           name: filename,
           id: result.fileId || result.id || String(Date.now()),
           url: result.url || `https://lh3.googleusercontent.com/d/${result.fileId || result.id}`,
@@ -1624,6 +1933,24 @@ ${updates.purchaseId ? `<b>Đơn hàng liên kết:</b> ${updates.purchaseId}\n`
       console.error('Delete image failed', e);
       return false;
     }
+  };
+
+  const addWallet = async (wallet: Wallet) => {
+    setState(prev => ({ ...prev, wallets: [...(prev.wallets || []), wallet] }));
+    await apiService.createRecord('Wallets', wallet);
+  };
+
+  const updateWallet = async (id: string, updates: Partial<Wallet>) => {
+    setState(prev => ({
+      ...prev,
+      wallets: (prev.wallets || []).map(w => w.id === id ? { ...w, ...updates } : w)
+    }));
+    await apiService.updateRecord('Wallets', id, updates);
+  };
+
+  const deleteWallet = async (id: string) => {
+    setState(prev => ({ ...prev, wallets: (prev.wallets || []).filter(w => w.id !== id) }));
+    await apiService.deleteRecord('Wallets', id);
   };
 
   return (
@@ -1660,12 +1987,22 @@ ${updates.purchaseId ? `<b>Đơn hàng liên kết:</b> ${updates.purchaseId}\n`
       updateTask,
       deleteTask,
       updateTelegramSettings,
+      addWifiRecord,
+      updateWifiRecord,
+      deleteWifiRecord,
+      addCameraAccount,
+      updateCameraAccount,
+      deleteCameraAccount,
       uploadImage,
       deleteImage,
       addUser,
       updateUser,
       deleteUser,
-      updatePrintSettings
+      updatePrintSettings,
+      addWallet,
+      updateWallet,
+      deleteWallet,
+      syncData
     }}>
       {children}
     </AppContext.Provider>
